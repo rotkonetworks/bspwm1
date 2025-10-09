@@ -10,7 +10,9 @@ typedef enum {
     EASE_LINEAR,
     EASE_OUT_CUBIC,
     EASE_IN_OUT_CUBIC,
-    EASE_OUT_BACK
+    EASE_IN_OUT_QUART,
+    EASE_OUT_BACK,
+    EASE_WINDOW_MOVE
 } easing_function_t;
 
 typedef enum {

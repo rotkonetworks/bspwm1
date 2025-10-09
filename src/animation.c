@@ -11,7 +11,7 @@
 #include "helpers.h"
 
 #define MAX_ANIMATIONS 64
-#define MIN_ANIMATION_DISTANCE 5
+#define MIN_ANIMATION_DISTANCE 3
 #define MAX_ANIMATION_DURATION 1000
 
 // global settings are defined in settings.c
@@ -46,7 +46,20 @@ static uint64_t get_time_ms(void)
     return ms + ns_ms;
 }
 
-// clamped easing functions
+// smooth easing functions for 60fps+ animations
+static double ease_in_out_cubic(double t)
+{
+    if (t <= 0.0) return 0.0;
+    if (t >= 1.0) return 1.0;
+
+    if (t < 0.5) {
+        return 4.0 * t * t * t;
+    } else {
+        double f = 2.0 * t - 2.0;
+        return 1.0 + f * f * f * 0.5;
+    }
+}
+
 static double ease_out_cubic(double t)
 {
     if (t <= 0.0) return 0.0;
@@ -54,6 +67,19 @@ static double ease_out_cubic(double t)
 
     double t1 = t - 1.0;
     return t1 * t1 * t1 + 1.0;
+}
+
+static double ease_in_out_quart(double t)
+{
+    if (t <= 0.0) return 0.0;
+    if (t >= 1.0) return 1.0;
+
+    if (t < 0.5) {
+        return 8.0 * t * t * t * t;
+    } else {
+        double f = t - 1.0;
+        return 1.0 - 8.0 * f * f * f * f;
+    }
 }
 
 static double ease_out_back(double t)
@@ -65,9 +91,19 @@ static double ease_out_back(double t)
     const double c3 = c1 + 1.0;
 
     double t1 = t - 1.0;
-    if (t1 < -1.0) t1 = -1.0;  // defensive clamping
+    if (t1 < -1.0) t1 = -1.0;
 
     return 1.0 + c3 * (t1 * t1 * t1) + c1 * (t1 * t1);
+}
+
+// optimized ease for window movements - feels most natural
+static double ease_window_move(double t)
+{
+    if (t <= 0.0) return 0.0;
+    if (t >= 1.0) return 1.0;
+
+    // custom curve: starts slow, speeds up, then eases out
+    return t * t * (3.0 - 2.0 * t);
 }
 
 void animation_init(void)
@@ -163,7 +199,7 @@ animation_t *animate_window(xcb_window_t win, xcb_rectangle_t to)
     anim->start_time = get_time_ms();
     anim->duration = animation_duration > MAX_ANIMATION_DURATION ?
                      MAX_ANIMATION_DURATION : animation_duration;
-    anim->easing = EASE_OUT_CUBIC;
+    anim->easing = EASE_WINDOW_MOVE;
     anim->data.move_resize.from = from;
     anim->data.move_resize.to = to;
     anim->on_complete = NULL;
@@ -181,9 +217,9 @@ animation_t *animate_window_center(xcb_window_t win, xcb_rectangle_t to)
 {
     animation_t *anim = animate_window(win, to);
     if (anim != NULL) {
-        anim->easing = EASE_OUT_BACK;
-        // safe addition with overflow check
-        uint64_t extra_duration = 25;
+        anim->easing = EASE_IN_OUT_QUART;
+        // slightly longer for centering animation - feels more natural
+        uint64_t extra_duration = 50;
         if (anim->duration <= MAX_ANIMATION_DURATION - extra_duration) {
             anim->duration += extra_duration;
         }
@@ -211,7 +247,7 @@ void animation_stop_window(xcb_window_t win)
     }
 }
 
-// safe interpolation with bounds checking
+// smooth sub-pixel interpolation with proper rounding
 static int16_t interpolate_int16(int16_t from, int16_t to, double progress)
 {
     if (progress <= 0.0) return from;
@@ -220,7 +256,9 @@ static int16_t interpolate_int16(int16_t from, int16_t to, double progress)
     double diff = (double)to - (double)from;
     double result = (double)from + (diff * progress);
 
-    // Clamp to int16_t range
+    // Round to nearest integer for smoother motion
+    result = result >= 0.0 ? result + 0.5 : result - 0.5;
+
     if (result < INT16_MIN) return INT16_MIN;
     if (result > INT16_MAX) return INT16_MAX;
 
@@ -233,9 +271,8 @@ static uint16_t interpolate_uint16(uint16_t from, uint16_t to, double progress)
     if (progress >= 1.0) return to;
 
     double diff = (double)to - (double)from;
-    double result = (double)from + (diff * progress);
+    double result = (double)from + (diff * progress) + 0.5; // round to nearest
 
-    // Clamp to uint16_t range
     if (result < 0) return 0;
     if (result > UINT16_MAX) return UINT16_MAX;
 
@@ -293,12 +330,24 @@ void animation_tick(void)
 
             double eased;
             switch (anim->easing) {
+                case EASE_IN_OUT_CUBIC:
+                    eased = ease_in_out_cubic(progress);
+                    break;
+                case EASE_IN_OUT_QUART:
+                    eased = ease_in_out_quart(progress);
+                    break;
                 case EASE_OUT_BACK:
                     eased = ease_out_back(progress);
                     break;
                 case EASE_OUT_CUBIC:
-                default:
                     eased = ease_out_cubic(progress);
+                    break;
+                case EASE_WINDOW_MOVE:
+                    eased = ease_window_move(progress);
+                    break;
+                case EASE_LINEAR:
+                default:
+                    eased = progress;
                     break;
             }
 

@@ -41,6 +41,7 @@
 #include "window.h"
 #include "tree.h"
 #include "animation.h"
+#include "rule.h"
 
 #define MAX_TREE_DEPTH 256
 #define SAFE_ADD(a, b, max) ((b) > 0 && (a) > (max) - (b)) ? (max) : (a) + (b)
@@ -351,11 +352,105 @@ node_t *find_public(desktop_t *d)
 	return b_automatic ? b_automatic : b_manual;
 }
 
+bool window_ignores_tile_limits(xcb_window_t win)
+{
+	if (!win) {
+		return false;
+	}
+
+	xcb_icccm_get_wm_class_reply_t reply;
+	bool result = false;
+
+	if (xcb_icccm_get_wm_class_reply(dpy, xcb_icccm_get_wm_class(dpy, win), &reply, NULL) != 1) {
+		return false;
+	}
+
+	if (!reply.class_name) {
+		goto cleanup;
+	}
+
+	for (rule_t *r = rule_head; r != NULL; r = r->next) {
+		if (streq(r->class_name, MATCH_ANY) || streq(reply.class_name, r->class_name)) {
+			if (strstr(r->effect, "ignore_tile_limits=on") != NULL) {
+				result = true;
+				break;
+			}
+		}
+	}
+
+cleanup:
+	xcb_icccm_get_wm_class_reply_wipe(&reply);
+	return result;
+}
+
+static void count_tiled_nodes_iterative(node_t *root, int *count)
+{
+	if (!root || !count) {
+		return;
+	}
+
+	node_t *stack[1024];
+	int stack_top = 0;
+
+	stack[stack_top++] = root;
+
+	while (stack_top > 0) {
+		if (stack_top >= 1024) {
+			break;
+		}
+
+		node_t *n = stack[--stack_top];
+		if (!n) {
+			continue;
+		}
+
+		if (n->client && !IS_FLOATING(n->client)) {
+			if (*count >= INT_MAX - 1) {
+				break;
+			}
+			(*count)++;
+		}
+
+		if (n->second_child && stack_top < 1023) {
+			stack[stack_top++] = n->second_child;
+		}
+		if (n->first_child && stack_top < 1023) {
+			stack[stack_top++] = n->first_child;
+		}
+	}
+}
+
+int count_tiled_windows(desktop_t *d)
+{
+	if (!d || !d->root) {
+		return 0;
+	}
+
+	int count = 0;
+	count_tiled_nodes_iterative(d->root, &count);
+	return count;
+}
+
 node_t *insert_node(monitor_t *m, desktop_t *d, node_t *n, node_t *f)
 {
 	if (!d || !n) {
 		return NULL;
 	}
+
+	if (!d->tile_limit_enabled || !n->client || IS_FLOATING(n->client)) {
+		goto insert_node;
+	}
+
+	if (window_ignores_tile_limits(n->id)) {
+		goto insert_node;
+	}
+
+	int current_tiles = count_tiled_windows(d);
+	if (current_tiles >= d->max_tiles_per_desktop) {
+		return NULL;
+	}
+
+insert_node:
 
 	bool d_was_not_occupied = !d->root;
 

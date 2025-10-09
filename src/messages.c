@@ -1854,6 +1854,56 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
+	} else if (streq("tile_limit_enabled", name)) {
+		bool b;
+		if (!parse_bool(value, &b)) {
+			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
+			return;
+		}
+
+		if (loc.desktop != NULL) {
+			loc.desktop->tile_limit_enabled = b;
+			return;
+		}
+
+		if (loc.monitor != NULL) {
+			for (desktop_t *d = loc.monitor->desk_head; d != NULL; d = d->next) {
+				d->tile_limit_enabled = b;
+			}
+			return;
+		}
+
+		tile_limit_enabled = b;
+		for (monitor_t *m = mon_head; m != NULL; m = m->next) {
+			for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
+				d->tile_limit_enabled = b;
+			}
+		}
+	} else if (streq("max_tiles_per_desktop", name)) {
+		int limit;
+		if (sscanf(value, "%i", &limit) != 1 || limit < 1 || limit > MAX_TILES_PER_DESKTOP) {
+			fail(rsp, "config: %s: Invalid value: '%s' (must be 1-%d).\n", name, value, MAX_TILES_PER_DESKTOP);
+			return;
+		}
+
+		if (loc.desktop != NULL) {
+			loc.desktop->max_tiles_per_desktop = limit;
+			return;
+		}
+
+		if (loc.monitor != NULL) {
+			for (desktop_t *d = loc.monitor->desk_head; d != NULL; d = d->next) {
+				d->max_tiles_per_desktop = limit;
+			}
+			return;
+		}
+
+		max_tiles_per_desktop = limit;
+		for (monitor_t *m = mon_head; m != NULL; m = m->next) {
+			for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
+				d->max_tiles_per_desktop = limit;
+			}
+		}
 #define SET_MON_BOOL(s) \
 	} else if (streq(#s, name)) { \
 		if (!parse_bool(value, &s)) { \
@@ -1993,6 +2043,18 @@ void get_setting(coordinates_t loc, char *name, FILE* rsp)
 		fprintf(rsp, "%s", BOOL_STR(animation_enabled));
 	} else if (streq("animation_duration", name)) {
 		fprintf(rsp, "%lu", animation_duration);
+	} else if (streq("tile_limit_enabled", name)) {
+		if (loc.desktop != NULL) {
+			fprintf(rsp, "%s", BOOL_STR(loc.desktop->tile_limit_enabled));
+		} else {
+			fprintf(rsp, "%s", BOOL_STR(tile_limit_enabled));
+		}
+	} else if (streq("max_tiles_per_desktop", name)) {
+		if (loc.desktop != NULL) {
+			fprintf(rsp, "%i", loc.desktop->max_tiles_per_desktop);
+		} else {
+			fprintf(rsp, "%i", max_tiles_per_desktop);
+		}
 	} else {
 		fail(rsp, "config: Unknown setting: '%s'.\n", name);
 		return;

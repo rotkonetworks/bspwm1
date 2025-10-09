@@ -247,6 +247,8 @@ desktop_t *make_desktop(const char *name, uint32_t id)
 	d->window_gap = window_gap;
 	d->border_width = border_width;
 	d->urgent_count = 0;
+	d->tile_limit_enabled = false;
+	d->max_tiles_per_desktop = 0;
 	return d;
 }
 

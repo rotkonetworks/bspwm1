@@ -68,6 +68,9 @@
 #define REMOVE_UNPLUGGED_MONITORS   false
 #define MERGE_OVERLAPPING_MONITORS  false
 
+#define TILE_LIMIT_ENABLED          false
+#define MAX_TILES_PER_DESKTOP       8
+
 extern char external_rules_command[MAXLEN];
 extern char status_prefix[MAXLEN];
 
@@ -112,6 +115,9 @@ extern honor_size_hints_mode_t honor_size_hints;
 extern bool remove_disabled_monitors;
 extern bool remove_unplugged_monitors;
 extern bool merge_overlapping_monitors;
+
+extern bool tile_limit_enabled;
+extern int max_tiles_per_desktop;
 
 void run_config(int run_level);
 void load_settings(void);

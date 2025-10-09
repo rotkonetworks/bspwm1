@@ -298,6 +298,8 @@ struct desktop_t {
 	int window_gap;
 	unsigned int border_width;
 	unsigned int urgent_count;
+	bool tile_limit_enabled;
+	int max_tiles_per_desktop;
 };
 
 typedef struct monitor_t monitor_t;

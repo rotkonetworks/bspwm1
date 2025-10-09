@@ -71,6 +71,9 @@ bool remove_disabled_monitors;
 bool remove_unplugged_monitors;
 bool merge_overlapping_monitors;
 
+bool tile_limit_enabled;
+int max_tiles_per_desktop;
+
 // Animation settings
 bool animation_enabled;
 uint64_t animation_duration;
@@ -136,7 +139,10 @@ void load_settings(void)
 	remove_unplugged_monitors = REMOVE_UNPLUGGED_MONITORS;
 	merge_overlapping_monitors = MERGE_OVERLAPPING_MONITORS;
 
-	// animation defaults - 25ms for snappy feel
-	animation_enabled = false;  // sefault OFF as discussed
-	animation_duration = 25;    // 25ms when enabled
+	tile_limit_enabled = TILE_LIMIT_ENABLED;
+	max_tiles_per_desktop = MAX_TILES_PER_DESKTOP;
+
+	// animation defaults - optimized for 60fps smoothness
+	animation_enabled = false;  // default OFF as discussed
+	animation_duration = 200;   // 200ms for smooth, natural feel
 }
