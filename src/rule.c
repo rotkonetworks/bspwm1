@@ -332,7 +332,10 @@ void _apply_name(xcb_window_t win, rule_consequence_t *csq)
 {
 	xcb_icccm_get_text_property_reply_t reply;
 	if (xcb_icccm_get_wm_name_reply(dpy, xcb_icccm_get_wm_name(dpy, win), &reply, NULL) == 1) {
-		snprintf(csq->name, sizeof(csq->name), "%.*s", reply.name_len, reply.name);
+		/* Clamp length to prevent buffer overflow and format truncation warnings */
+		int safe_len = (reply.name_len > (int)(sizeof(csq->name) - 1)) ?
+		               (int)(sizeof(csq->name) - 1) : reply.name_len;
+		snprintf(csq->name, sizeof(csq->name), "%.*s", safe_len, reply.name);
 		xcb_icccm_get_text_property_reply_wipe(&reply);
 	}
 }
