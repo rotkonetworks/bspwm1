@@ -90,15 +90,15 @@ void remove_rule_by_cause(char *cause)
     char *instance_name = tokenize_with_escape(&state, NULL, COL_TOK[0]);
     char *name = tokenize_with_escape(&state, NULL, COL_TOK[0]);
 
-    if (class_name && strlen(class_name) >= MAXLEN) {
+    if (class_name && strnlen(class_name, MAXLEN) >= MAXLEN) {
         free(class_name);
         class_name = NULL;
     }
-    if (instance_name && strlen(instance_name) >= MAXLEN) {
+    if (instance_name && strnlen(instance_name, MAXLEN) >= MAXLEN) {
         free(instance_name);
         instance_name = NULL;
     }
-    if (name && strlen(name) >= MAXLEN) {
+    if (name && strnlen(name, MAXLEN) >= MAXLEN) {
         free(name);
         name = NULL;
     }
@@ -357,7 +357,7 @@ void parse_keys_values(char *buf, rule_consequence_t *csq)
     char *value = strtok(NULL, CSQ_BLK);
 
     while (key != NULL && value != NULL) {
-        if (strlen(key) < MAXLEN && strlen(value) < MAXLEN) {
+        if (strnlen(key, MAXLEN) < MAXLEN && strnlen(value, MAXLEN) < MAXLEN) {
             parse_key_value(key, value, csq);
         }
         key = strtok(NULL, CSQ_BLK);

@@ -172,12 +172,26 @@ char *mktempfifo(const char *template)
 		runtime_dir = "/tmp";
 	}
 
-	char *fifo_path = malloc(strlen(runtime_dir)+1+strlen(template)+1);
-	if (fifo_path == NULL) {
-		return NULL;
-	}
+	size_t runtime_len = strlen(runtime_dir);
+	size_t template_len = strlen(template);
+	size_t path_len = runtime_len + 1 + template_len + 1;
 
-	sprintf(fifo_path, "%s/%s", runtime_dir, template);
+	char *fifo_path;
+	if (path_len < 512) {
+		char stack_path[path_len];
+		sprintf(stack_path, "%s/%s", runtime_dir, template);
+		fifo_path = malloc(path_len);
+		if (fifo_path == NULL) {
+			return NULL;
+		}
+		memcpy(fifo_path, stack_path, path_len);
+	} else {
+		fifo_path = malloc(path_len);
+		if (fifo_path == NULL) {
+			return NULL;
+		}
+		sprintf(fifo_path, "%s/%s", runtime_dir, template);
+	}
 
 	if ((tempfd = mkstemp(fifo_path)) == -1) {
 		free(fifo_path);

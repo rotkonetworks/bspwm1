@@ -126,8 +126,10 @@ void animation_cleanup(void)
 }
 
 // safe rectangle distance calculation
-static bool calculate_distance(const xcb_rectangle_t *from, const xcb_rectangle_t *to,
-                              int *dx, int *dy, int *dw, int *dh)
+static bool calculate_distance(const xcb_rectangle_t *restrict from,
+                              const xcb_rectangle_t *restrict to,
+                              int *restrict dx, int *restrict dy,
+                              int *restrict dw, int *restrict dh)
 {
     if (!from || !to || !dx || !dy || !dw || !dh) {
         return false;
