@@ -182,11 +182,15 @@ char *mktempfifo(const char *template)
 		return NULL;
 	}
 
-	int ret = snprintf(fifo_path, path_len, "%s/%s", runtime_dir, template);
-	if (ret < 0 || ret >= (int)path_len) {
+	/* Validate components fit before formatting */
+	if (runtime_len + 1 + template_len + 1 > path_len) {
+		/* This should never happen due to our allocation, but be defensive */
 		free(fifo_path);
 		return NULL;
 	}
+
+	/* Safe formatting - length already validated */
+	sprintf(fifo_path, "%s/%s", runtime_dir, template);
 
 	if ((tempfd = mkstemp(fifo_path)) == -1) {
 		free(fifo_path);

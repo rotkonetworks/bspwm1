@@ -172,10 +172,16 @@ int main(int argc, char *argv[])
 		}
 
 		sock_address.sun_family = AF_UNIX;
-		int ret = snprintf(sock_address.sun_path, sizeof(sock_address.sun_path), "%s", socket_path);
-		if (ret < 0 || ret >= (int)sizeof(sock_address.sun_path)) {
-			err("Socket path too long: %s\n", socket_path);
+
+		/* Validate socket path length before attempting copy */
+		size_t socket_path_len = strlen(socket_path);
+		if (socket_path_len >= sizeof(sock_address.sun_path)) {
+			err("Socket path too long (%zu >= %zu): %s\n",
+			    socket_path_len, sizeof(sock_address.sun_path), socket_path);
 		}
+
+		/* Safe copy - length already validated */
+		strcpy(sock_address.sun_path, socket_path);
 
 		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
