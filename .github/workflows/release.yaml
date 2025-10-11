@@ -4,16 +4,23 @@ on:
     tags:
       - '*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag to release'
+        required: true
+        type: string
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: alpine:latest
+    container: archlinux:latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.tag || github.ref }}
     - name: Install dependencies
       run: |
-        apk add --no-cache build-base xcb-util-dev xcb-util-keysyms-dev \
-          xcb-util-wm-dev xcb-util-xrm-dev
+        pacman -Syu --noconfirm base-devel libxcb xcb-util xcb-util-keysyms \
+          xcb-util-wm
     - name: Build
       run: make
     - name: Strip binaries
@@ -21,6 +28,7 @@ jobs:
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
+        tag_name: ${{ inputs.tag || github.ref_name }}
         files: |
           bspwm
           bspc
