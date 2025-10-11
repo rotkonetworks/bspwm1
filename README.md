@@ -1,4 +1,4 @@
-# bspwm-rotko
+# bspwm1
 
 hardened and optimized fork of baskerville/bspwm with security fixes and significant performance improvements.
 
