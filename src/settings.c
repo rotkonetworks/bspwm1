@@ -142,7 +142,7 @@ void load_settings(void)
 	tile_limit_enabled = TILE_LIMIT_ENABLED;
 	max_tiles_per_desktop = MAX_TILES_PER_DESKTOP;
 
-	// animation defaults - optimized for 60fps smoothness
+	// animation defaults - snappy feel
 	animation_enabled = false;  // default OFF as discussed
-	animation_duration = 200;   // 200ms for smooth, natural feel
+	animation_duration = 5;     // 5ms for very fast animations
 }

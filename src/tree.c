@@ -447,7 +447,12 @@ node_t *insert_node(monitor_t *m, desktop_t *d, node_t *n, node_t *f)
 
 	int current_tiles = count_tiled_windows(d);
 	if (current_tiles >= d->max_tiles_per_desktop) {
-		return NULL;
+		// Force window to be floating when tile limit is reached
+		// This keeps it managed by bspwm instead of becoming unmanaged
+		if (n->client) {
+			n->client->state = STATE_FLOATING;
+		}
+		goto insert_node;
 	}
 
 insert_node:
