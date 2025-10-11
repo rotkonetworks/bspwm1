@@ -88,7 +88,7 @@ bool auto_raise;
 bool sticky_still;
 bool hide_sticky;
 bool record_history;
-volatile bool running;
+volatile sig_atomic_t running;
 volatile bool restart;
 bool randr;
 
@@ -202,11 +202,16 @@ int main(int argc, char *argv[])
 
 	fcntl(sock_fd, F_SETFD, FD_CLOEXEC | fcntl(sock_fd, F_GETFD));
 
-	signal(SIGINT, sig_handler);
-	signal(SIGHUP, sig_handler);
-	signal(SIGTERM, sig_handler);
-	signal(SIGCHLD, sig_handler);
-	signal(SIGPIPE, SIG_IGN);
+	struct sigaction sigact;
+	sigact.sa_handler = sig_handler;
+	sigemptyset(&sigact.sa_mask);
+	sigact.sa_flags = SA_RESTART;
+	sigaction(SIGCHLD, &sigact, NULL);
+	sigaction(SIGINT, &sigact, NULL);
+	sigaction(SIGHUP, &sigact, NULL);
+	sigaction(SIGTERM, &sigact, NULL);
+	/* Avoid SIG_IGN for SIGPIPE as it persists across exec */
+	sigaction(SIGPIPE, &sigact, NULL);
 	run_config(run_level);
 	running = true;
 
@@ -540,11 +545,10 @@ bool check_connection (xcb_connection_t *dpy)
 void sig_handler(int sig)
 {
 	if (sig == SIGCHLD) {
-		signal(sig, sig_handler);
 		while (waitpid(-1, 0, WNOHANG) > 0)
 			;
 	} else if (sig == SIGINT || sig == SIGHUP || sig == SIGTERM) {
-		running = false;
+		running = 0;
 	}
 }
 

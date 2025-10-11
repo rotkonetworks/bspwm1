@@ -350,7 +350,13 @@ void focus_in(xcb_generic_event_t *evt)
 		if (e->event == mon->desk->focus->id)
 			return;
 		if (e->event == root) {
+			/* Some clients expect the window manager to refocus the
+			   focused window in this case. Temporarily disable
+			   pointer_follows_focus to prevent unwanted warping */
+			bool pff = pointer_follows_focus;
+			pointer_follows_focus = false;
 			focus_node(mon, mon->desk, mon->desk->focus);
+			pointer_follows_focus = pff;
 			return;
 		}
 	}
