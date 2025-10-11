@@ -38,23 +38,23 @@
 #define MAX_RULE_EFFECT_LEN  1024
 
 
-typedef enum {
+typedef enum split_type : unsigned char {
 	TYPE_HORIZONTAL,
 	TYPE_VERTICAL
 } split_type_t;
 
-typedef enum {
+typedef enum split_mode : unsigned char {
 	MODE_AUTOMATIC,
 	MODE_MANUAL
 } split_mode_t;
 
-typedef enum {
+typedef enum automatic_scheme : unsigned char {
 	SCHEME_LONGEST_SIDE,
 	SCHEME_ALTERNATE,
 	SCHEME_SPIRAL
 } automatic_scheme_t;
 
-typedef enum {
+typedef enum honor_size_hints_mode : unsigned char {
 	HONOR_SIZE_HINTS_NO = 0,
 	HONOR_SIZE_HINTS_YES,
 	HONOR_SIZE_HINTS_FLOATING,
@@ -62,46 +62,46 @@ typedef enum {
 	HONOR_SIZE_HINTS_DEFAULT
 } honor_size_hints_mode_t;
 
-typedef enum {
+typedef enum client_state : unsigned char {
 	STATE_TILED,
 	STATE_PSEUDO_TILED,
 	STATE_FLOATING,
 	STATE_FULLSCREEN
 } client_state_t;
 
-typedef enum {
-	WM_FLAG_MODAL = 1 << 0,
-	WM_FLAG_STICKY = 1 << 1,
-	WM_FLAG_MAXIMIZED_VERT = 1 << 2,
-	WM_FLAG_MAXIMIZED_HORZ = 1 << 3,
-	WM_FLAG_SHADED = 1 << 4,
-	WM_FLAG_SKIP_TASKBAR = 1 << 5,
-	WM_FLAG_SKIP_PAGER = 1 << 6,
-	WM_FLAG_HIDDEN = 1 << 7,
-	WM_FLAG_FULLSCREEN = 1 << 8,
-	WM_FLAG_ABOVE = 1 << 9,
-	WM_FLAG_BELOW = 1 << 10,
-	WM_FLAG_DEMANDS_ATTENTION = 1 << 11,
+typedef enum wm_flags : uint16_t {
+	WM_FLAG_MODAL = 0b1,
+	WM_FLAG_STICKY = 0b10,
+	WM_FLAG_MAXIMIZED_VERT = 0b100,
+	WM_FLAG_MAXIMIZED_HORZ = 0b1000,
+	WM_FLAG_SHADED = 0b10000,
+	WM_FLAG_SKIP_TASKBAR = 0b100000,
+	WM_FLAG_SKIP_PAGER = 0b1000000,
+	WM_FLAG_HIDDEN = 0b10000000,
+	WM_FLAG_FULLSCREEN = 0b100000000,
+	WM_FLAG_ABOVE = 0b1000000000,
+	WM_FLAG_BELOW = 0b10000000000,
+	WM_FLAG_DEMANDS_ATTENTION = 0b100000000000,
 } wm_flags_t;
 
-typedef enum {
+typedef enum stack_layer : unsigned char {
 	LAYER_BELOW,
 	LAYER_NORMAL,
 	LAYER_ABOVE
 } stack_layer_t;
 
-typedef enum {
+typedef enum option_bool : unsigned char {
 	OPTION_NONE,
 	OPTION_TRUE,
 	OPTION_FALSE
 } option_bool_t;
 
-typedef enum {
+typedef enum alter_state : unsigned char {
 	ALTER_TOGGLE,
 	ALTER_SET
 } alter_state_t;
 
-typedef enum {
+typedef enum cycle_dir : unsigned char {
 	CYCLE_NEXT,
 	CYCLE_PREV
 } cycle_dir_t;
@@ -116,25 +116,25 @@ typedef enum {
 	HISTORY_NEWER
 } history_dir_t;
 
-typedef enum {
+typedef enum direction : unsigned char {
 	DIR_NORTH,
 	DIR_WEST,
 	DIR_SOUTH,
 	DIR_EAST
 } direction_t;
 
-typedef enum {
-	HANDLE_LEFT = 1 << 0,
-	HANDLE_TOP = 1 << 1,
-	HANDLE_RIGHT = 1 << 2,
-	HANDLE_BOTTOM = 1 << 3,
+typedef enum resize_handle : unsigned char {
+	HANDLE_LEFT = 0b1,
+	HANDLE_TOP = 0b10,
+	HANDLE_RIGHT = 0b100,
+	HANDLE_BOTTOM = 0b1000,
 	HANDLE_TOP_LEFT = HANDLE_TOP | HANDLE_LEFT,
 	HANDLE_TOP_RIGHT = HANDLE_TOP | HANDLE_RIGHT,
 	HANDLE_BOTTOM_RIGHT = HANDLE_BOTTOM | HANDLE_RIGHT,
 	HANDLE_BOTTOM_LEFT = HANDLE_BOTTOM | HANDLE_LEFT
 } resize_handle_t;
 
-typedef enum {
+typedef enum pointer_action : unsigned char {
 	ACTION_NONE,
 	ACTION_FOCUS,
 	ACTION_MOVE,
@@ -142,34 +142,34 @@ typedef enum {
 	ACTION_RESIZE_CORNER
 } pointer_action_t;
 
-typedef enum {
+typedef enum layout : unsigned char {
 	LAYOUT_TILED,
 	LAYOUT_MONOCLE
 } layout_t;
 
-typedef enum {
+typedef enum flip : unsigned char {
 	FLIP_HORIZONTAL,
 	FLIP_VERTICAL
 } flip_t;
 
-typedef enum {
+typedef enum child_polarity : unsigned char {
 	FIRST_CHILD,
 	SECOND_CHILD
 } child_polarity_t;
 
-typedef enum {
+typedef enum tightness : unsigned char {
 	TIGHTNESS_LOW,
 	TIGHTNESS_HIGH,
 } tightness_t;
 
-typedef enum {
+typedef enum area_peak : unsigned char {
 	AREA_BIGGEST,
 	AREA_SMALLEST,
 } area_peak_t;
 
-typedef enum {
-	STATE_TRANSITION_ENTER = 1 << 0,
-	STATE_TRANSITION_EXIT = 1 << 1,
+typedef enum state_transition : unsigned char {
+	STATE_TRANSITION_ENTER = 0b1,
+	STATE_TRANSITION_EXIT = 0b10,
 } state_transition_t;
 
 typedef struct {

@@ -79,29 +79,29 @@
 #define streq(s1, s2)     (strcmp((s1), (s2)) == 0)
 #define unsigned_subtract(a, b)  \
 	do {                         \
-		if (b > a) {             \
-			a = 0;               \
+		if ((b) > (a)) {         \
+			(a) = 0;             \
 		} else {                 \
-			a -= b;              \
+			(a) -= (b);          \
 		}                        \
 	} while (false)
 
 
-void warn(char *fmt, ...);
-void err(char *fmt, ...);
+__attribute__((format(printf, 1, 2))) void warn(char *fmt, ...);
+__attribute__((format(printf, 1, 2), noreturn)) void err(char *fmt, ...);
 void secure_memzero(void *ptr, size_t len);
-char *read_string(const char *file_path, size_t *tlen);
-char *copy_string(char *str, size_t len);
-char *mktempfifo(const char *template);
-int asprintf(char **buf, const char *fmt, ...);
-int vasprintf(char **buf, const char *fmt, va_list args);
-bool is_hex_color(const char *color);
+__attribute__((warn_unused_result)) char *read_string(const char *file_path, size_t *tlen);
+__attribute__((warn_unused_result)) char *copy_string(char *str, size_t len);
+__attribute__((warn_unused_result)) char *mktempfifo(const char *template);
+__attribute__((warn_unused_result, format(printf, 2, 3))) int asprintf(char **buf, const char *fmt, ...);
+__attribute__((warn_unused_result, format(printf, 2, 0))) int vasprintf(char **buf, const char *fmt, va_list args);
+__attribute__((warn_unused_result)) bool is_hex_color(const char *color);
 
 struct tokenize_state {
 	bool in_escape;
 	const char *pos;
 	size_t len;
 };
-char *tokenize_with_escape(struct tokenize_state *state, const char *s, char sep);
+__attribute__((warn_unused_result)) char *tokenize_with_escape(struct tokenize_state *state, const char *s, char sep);
 
 #endif
