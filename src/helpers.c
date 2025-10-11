@@ -261,9 +261,9 @@ char *tokenize_with_escape(struct tokenize_state *state, const char *s, char sep
     char *ret = outp;
     char cur;
     size_t out_len = 0;
+    size_t max_len = state->len - 1;
 
-    while (*state->pos && out_len < state->len - 1) {
-        --state->len;
+    while (*state->pos && out_len < max_len) {
         cur = *state->pos++;
 
         if (state->in_escape) {

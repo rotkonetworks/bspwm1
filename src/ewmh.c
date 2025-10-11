@@ -157,6 +157,7 @@ void ewmh_update_desktop_names(void)
 				char *new_names = realloc(names, new_capacity);
 				if (new_names == NULL) {
 					free(names);
+					names = NULL;
 					xcb_ewmh_set_desktop_names(ewmh, default_screen, 0, NULL);
 					return;
 				}

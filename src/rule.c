@@ -352,10 +352,6 @@ void parse_keys_values(char *buf, rule_consequence_t *csq)
 
     memcpy(buf_copy, buf, len);
     buf_copy[len] = '\0';
-    if (buf_copy == NULL) {
-        return;
-    }
-    strcpy(buf_copy, buf);
 
     char *key = strtok(buf_copy, CSQ_BLK);
     char *value = strtok(NULL, CSQ_BLK);

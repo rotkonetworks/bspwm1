@@ -115,6 +115,7 @@ int main(int argc, char *argv[])
 			char *new_msg = realloc(msg, new_capacity);
 			if (new_msg == NULL) {
 				free(msg);
+				msg = NULL;
 				close(sock_fd);
 				err("Failed to grow message buffer.\n");
 			}

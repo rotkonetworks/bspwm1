@@ -70,6 +70,7 @@ void handle_message(char *msg, int msg_len, FILE *rsp)
 			char **new = realloc(args, cap * sizeof(char *));
 			if (new == NULL) {
 				free(args);
+				args = NULL;
 				perror("Handle message: realloc");
 				return;
 			} else {
