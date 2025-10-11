@@ -90,31 +90,43 @@ void handle_message(char *msg, int msg_len, FILE *rsp)
 	free(args_orig);
 }
 
+typedef struct {
+	const char *name;
+	void (*handler)(char **, int, FILE *);
+	bool returns_early;
+} command_entry_t;
+
+static const command_entry_t command_table[] = {
+	{"node", cmd_node, false},
+	{"desktop", cmd_desktop, false},
+	{"monitor", cmd_monitor, false},
+	{"query", cmd_query, false},
+	{"subscribe", cmd_subscribe, true},
+	{"wm", cmd_wm, false},
+	{"rule", cmd_rule, false},
+	{"config", cmd_config, false},
+	{NULL, NULL, false}
+};
+
 void process_message(char **args, int num, FILE *rsp)
 {
-	if (streq("node", *args)) {
-		cmd_node(++args, --num, rsp);
-	} else if (streq("desktop", *args)) {
-		cmd_desktop(++args, --num, rsp);
-	} else if (streq("monitor", *args)) {
-		cmd_monitor(++args, --num, rsp);
-	} else if (streq("query", *args)) {
-		cmd_query(++args, --num, rsp);
-	} else if (streq("subscribe", *args)) {
-		cmd_subscribe(++args, --num, rsp);
-		return;
-	} else if (streq("wm", *args)) {
-		cmd_wm(++args, --num, rsp);
-	} else if (streq("rule", *args)) {
-		cmd_rule(++args, --num, rsp);
-	} else if (streq("config", *args)) {
-		cmd_config(++args, --num, rsp);
-	} else if (streq("quit", *args)) {
+	for (const command_entry_t *cmd = command_table; cmd->name; cmd++) {
+		if (streq(cmd->name, *args)) {
+			cmd->handler(++args, --num, rsp);
+			if (cmd->returns_early) return;
+			goto found;
+		}
+	}
+
+	// Handle special commands not in table
+	if (streq("quit", *args)) {
 		cmd_quit(++args, --num, rsp);
 	} else {
 		fail(rsp, "Unknown domain or command: '%s'.\n", *args);
+		return;
 	}
 
+found:
 	fflush(rsp);
 	fclose(rsp);
 }

@@ -61,6 +61,15 @@ node_t *next_node(node_t *n);
 node_t *prev_node(node_t *n);
 node_t *next_leaf(node_t *n, node_t *r);
 node_t *prev_leaf(node_t *n, node_t *r);
+
+typedef struct {
+	node_t **nodes;
+	size_t count;
+	size_t capacity;
+} node_list_t;
+
+node_list_t *collect_leaves(node_t *root);
+void free_node_list(node_list_t *list);
 node_t *next_tiled_leaf(node_t *n, node_t *r);
 node_t *prev_tiled_leaf(node_t *n, node_t *r);
 bool is_adjacent(node_t *a, node_t *b, direction_t dir);

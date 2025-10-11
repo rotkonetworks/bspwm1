@@ -242,6 +242,15 @@ typedef struct {
 	wm_flags_t wm_flags;
 } client_t;
 
+#define GEOMETRY_CACHE_SIZE 32
+#define GEOMETRY_CACHE_TTL_MS 100
+
+typedef struct {
+	xcb_window_t win;
+	xcb_rectangle_t geometry;
+	uint64_t timestamp;
+	bool valid;
+} geometry_cache_entry_t;
 
 typedef struct presel_t presel_t;
 struct presel_t {

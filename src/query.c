@@ -36,6 +36,24 @@
 
 #define MAX_RECURSION_DEPTH 1000
 
+static query_buffer_t buffer_pool[4] = {0};
+
+query_buffer_t *get_query_buffer(void)
+{
+	for (int i = 0; i < 4; i++) {
+		if (!buffer_pool[i].in_use) {
+			buffer_pool[i].in_use = true;
+			return &buffer_pool[i];
+		}
+	}
+	return NULL;
+}
+
+void release_query_buffer(query_buffer_t *buf)
+{
+	if (buf) buf->in_use = false;
+}
+
 static void query_node_depth(node_t *n, FILE *rsp, int depth);
 static int query_node_ids_in_depth(node_t *n, desktop_t *d, monitor_t *m, coordinates_t *ref,
                                    coordinates_t *trg, node_select_t *sel, FILE *rsp, int depth);

@@ -1059,20 +1059,65 @@ node_t *brother_tree(node_t *n)
 	return is_first_child(n) ? n->parent->second_child : n->parent->first_child;
 }
 
-static node_t *first_extrema_bounded(node_t *n, int depth)
-{
-	if (!n || depth > MAX_TREE_DEPTH) {
-		return NULL;
-	}
-	if (!n->first_child) {
-		return n;
-	}
-	return first_extrema_bounded(n->first_child, depth + 1);
-}
-
 node_t *first_extrema(node_t *n)
 {
-	return first_extrema_bounded(n, 0);
+	if (!n) return NULL;
+
+	int depth = 0;
+	while (n->first_child && depth < MAX_TREE_DEPTH) {
+		n = n->first_child;
+		depth++;
+	}
+	return depth > MAX_TREE_DEPTH ? NULL : n;
+}
+
+node_list_t *collect_leaves(node_t *root)
+{
+	if (!root) return NULL;
+
+	node_list_t *list = malloc(sizeof(node_list_t));
+	if (!list) return NULL;
+
+	list->capacity = 64;
+	list->count = 0;
+	list->nodes = malloc(list->capacity * sizeof(node_t*));
+	if (!list->nodes) {
+		free(list);
+		return NULL;
+	}
+
+	node_t *stack[MAX_TREE_DEPTH];
+	int stack_top = 0;
+	stack[stack_top++] = root;
+
+	while (stack_top > 0) {
+		node_t *n = stack[--stack_top];
+		if (!n) continue;
+
+		if (is_leaf(n)) {
+			if (list->count >= list->capacity) {
+				size_t new_cap = list->capacity * 2;
+				node_t **new_nodes = realloc(list->nodes, new_cap * sizeof(node_t*));
+				if (!new_nodes) break;
+				list->nodes = new_nodes;
+				list->capacity = new_cap;
+			}
+			list->nodes[list->count++] = n;
+		} else {
+			if (n->second_child && stack_top < MAX_TREE_DEPTH - 1)
+				stack[stack_top++] = n->second_child;
+			if (n->first_child && stack_top < MAX_TREE_DEPTH - 1)
+				stack[stack_top++] = n->first_child;
+		}
+	}
+	return list;
+}
+
+void free_node_list(node_list_t *list)
+{
+	if (!list) return;
+	free(list->nodes);
+	free(list);
 }
 
 static node_t *second_extrema_bounded(node_t *n, int depth)

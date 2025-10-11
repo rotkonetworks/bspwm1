@@ -72,6 +72,15 @@ void print_pointer_action(pointer_action_t a, FILE *rsp);
 void resolve_rule_consequence(rule_consequence_t *csq);
 void print_rule_consequence(char **buf, rule_consequence_t *csq);
 void print_rectangle(char **buf, xcb_rectangle_t *rect);
+
+#define QUERY_BUF_SIZE 1024
+typedef struct {
+	char buffer[QUERY_BUF_SIZE];
+	bool in_use;
+} query_buffer_t;
+
+query_buffer_t *get_query_buffer(void);
+void release_query_buffer(query_buffer_t *buf);
 node_select_t make_node_select(void);
 desktop_select_t make_desktop_select(void);
 monitor_select_t make_monitor_select(void);

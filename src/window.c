@@ -36,6 +36,15 @@
 #include "rule.h"
 #include "settings.h"
 #include "animation.h"
+
+uint64_t get_time_ms(void)
+{
+	struct timespec ts;
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+		return 0;
+	}
+	return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 #include "geometry.h"
 #include "pointer.h"
 #include "stack.h"
@@ -1012,4 +1021,60 @@ bool window_exists(xcb_window_t win)
 	}
 
 	return true;
+}
+
+static geometry_cache_entry_t geometry_cache[GEOMETRY_CACHE_SIZE] = {0};
+
+bool get_cached_geometry(xcb_window_t win, xcb_rectangle_t *geometry)
+{
+	uint64_t current_time = get_time_ms();
+
+	for (int i = 0; i < GEOMETRY_CACHE_SIZE; i++) {
+		geometry_cache_entry_t *entry = &geometry_cache[i];
+		if (entry->valid && entry->win == win) {
+			if (current_time - entry->timestamp <= GEOMETRY_CACHE_TTL_MS) {
+				*geometry = entry->geometry;
+				return true;
+			} else {
+				entry->valid = false;
+			}
+		}
+	}
+	return false;
+}
+
+void cache_geometry(xcb_window_t win, xcb_rectangle_t geometry)
+{
+	uint64_t current_time = get_time_ms();
+	int slot = -1;
+
+	uint64_t oldest_time = UINT64_MAX;
+	for (int i = 0; i < GEOMETRY_CACHE_SIZE; i++) {
+		if (geometry_cache[i].win == win) {
+			slot = i;
+			break;
+		}
+		if (!geometry_cache[i].valid || geometry_cache[i].timestamp < oldest_time) {
+			oldest_time = geometry_cache[i].timestamp;
+			slot = i;
+		}
+	}
+
+	if (slot >= 0) {
+		geometry_cache[slot] = (geometry_cache_entry_t){
+			.win = win,
+			.geometry = geometry,
+			.timestamp = current_time,
+			.valid = true
+		};
+	}
+}
+
+void invalidate_geometry_cache(xcb_window_t win)
+{
+	for (int i = 0; i < GEOMETRY_CACHE_SIZE; i++) {
+		if (geometry_cache[i].win == win) {
+			geometry_cache[i].valid = false;
+		}
+	}
 }
