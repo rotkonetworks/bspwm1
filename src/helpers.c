@@ -177,20 +177,15 @@ char *mktempfifo(const char *template)
 	size_t path_len = runtime_len + 1 + template_len + 1;
 
 	char *fifo_path;
-	if (path_len < 512) {
-		char stack_path[path_len];
-		sprintf(stack_path, "%s/%s", runtime_dir, template);
-		fifo_path = malloc(path_len);
-		if (fifo_path == NULL) {
-			return NULL;
-		}
-		memcpy(fifo_path, stack_path, path_len);
-	} else {
-		fifo_path = malloc(path_len);
-		if (fifo_path == NULL) {
-			return NULL;
-		}
-		sprintf(fifo_path, "%s/%s", runtime_dir, template);
+	fifo_path = malloc(path_len);
+	if (fifo_path == NULL) {
+		return NULL;
+	}
+
+	int ret = snprintf(fifo_path, path_len, "%s/%s", runtime_dir, template);
+	if (ret < 0 || ret >= (int)path_len) {
+		free(fifo_path);
+		return NULL;
 	}
 
 	if ((tempfd = mkstemp(fifo_path)) == -1) {

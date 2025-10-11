@@ -85,8 +85,8 @@ void run_config(int run_level)
 			close(xcb_get_file_descriptor(dpy));
 		}
 		setsid();
-		char arg1[2];
-		snprintf(arg1, 2, "%i", run_level);
+		char arg1[12];  /* enough for INT_MIN */
+		snprintf(arg1, sizeof(arg1), "%i", run_level);
 		execl(config_path, config_path, arg1, (char *) NULL);
 		err("Couldn't execute the configuration file.\n");
 	}

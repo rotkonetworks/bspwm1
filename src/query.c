@@ -799,7 +799,9 @@ int desktop_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst)
 	dst->desktop = NULL;
 
 	if (*desc == '%') {
-		locate_desktop(desc + 1, dst);
+		if (!locate_desktop(desc + 1, dst)) {
+			return SELECTOR_BAD_DESCRIPTOR;
+		}
 		goto end;
 	}
 
@@ -923,7 +925,9 @@ int monitor_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst)
 	dst->monitor = NULL;
 
 	if (*desc == '%') {
-		locate_monitor(desc + 1, dst);
+		if (!locate_monitor(desc + 1, dst)) {
+			return SELECTOR_BAD_DESCRIPTOR;
+		}
 		goto end;
 	}
 
