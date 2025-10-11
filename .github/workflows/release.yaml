@@ -1,29 +1,23 @@
 name: Release bspwm
-
 on:
   push:
     tags:
       - '*'
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    container: alpine:latest
     steps:
     - uses: actions/checkout@v4
-
     - name: Install dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libxcb-util-dev libxcb-keysyms1-dev libxcb-icccm4-dev \
-          libxcb-ewmh-dev libxcb-randr0-dev libxcb-xinerama0-dev libxcb-shape0-dev
-
+        apk add --no-cache build-base xcb-util-dev xcb-util-keysyms-dev \
+          xcb-util-wm-dev xcb-util-xrm-dev
     - name: Build
       run: make
-
     - name: Strip binaries
       run: strip bspwm bspc
-
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
