@@ -1,0 +1,20 @@
+{
+  "current": {
+    "stats": {},
+    "size": {
+      "text_size": 247145,
+      "data_size": 3808,
+      "bss_size": 9584,
+      "total_size": 260537
+    }
+  },
+  "original": {
+    "stats": {},
+    "size": {
+      "text_size": 212764,
+      "data_size": 2112,
+      "bss_size": 2288,
+      "total_size": 217164
+    }
+  }
+}
