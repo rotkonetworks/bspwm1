@@ -169,6 +169,14 @@ animation_t *animate_window(xcb_window_t win, xcb_rectangle_t to)
     };
     free(geo);
 
+    // if window is at origin (0,0) or has minimal size, it's likely a new spawn
+    // position it at target location first to avoid corner-to-position animation
+    if ((from.x == 0 && from.y == 0) || from.width <= 1 || from.height <= 1) {
+        window_move_resize(win, to.x, to.y, to.width, to.height);
+        xcb_flush(dpy);
+        return NULL;
+    }
+
     // calculate movement distance safely
     int dx, dy, dw, dh;
     if (!calculate_distance(&from, &to, &dx, &dy, &dw, &dh)) {
