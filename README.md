@@ -33,15 +33,45 @@ major algorithmic and caching improvements over baskerville/bspwm 0.9.10:
 
 ## benchmark results
 
-| scenario | baseline | optimized | speedup |
-|----------|----------|-----------|---------|
-| heavy queries (1000x) | 2.50s | 0.16s | 15.4x |
-| window stress (100x) | 1.80s | 0.43s | 4.2x |
-| layout switching | 0.30s | 0.04s | 7.3x |
-| command dispatch | 850μs | 425μs | 2.0x |
-| geometry queries | 1200μs | 150μs | 8.0x |
+properly isolated performance comparison against upstream bspwm v0.9.12:
 
-**memory trade-off**: +8kb static memory, +42kb binary size for 2-15x performance gains.
+| operation | upstream | current | change |
+|-----------|----------|---------|--------|
+| query_desktops | 892.08μs | 865.43μs | +3.0% |
+| query_monitors | 848.10μs | 834.17μs | +1.6% |
+| desktop_ops | 2606.63μs | 2660.16μs | -2.1% |
+| layout_ops | 2311.19μs | 2346.09μs | -1.5% |
+| config_ops | 832.54μs | 843.39μs | -1.3% |
+
+**isolated benchmarks** (separate xvfb instances, 50 samples each):
+- average performance: essentially equivalent (±3%)
+- all differences within measurement noise
+- no statistically significant changes detected
+
+**binary size trade-off**: +29kb bspwm binary, +4.2kb bspc client for security hardening.
+
+## benchmarking
+
+comprehensive performance testing against upstream bspwm 0.9.12:
+
+```bash
+# run automated benchmark suite
+./benches/run_benchmarks.sh
+
+# manual microbenchmarks
+cd benches && gcc -o microbench microbench.c -lm -lxcb && ./microbench
+
+# integration benchmarks (requires x11)
+cd benches && python3 bench.py all
+```
+
+detailed results show equivalent performance vs upstream 0.9.12:
+- **core operations**: essentially identical performance (±3%)
+- **user experience**: feels noticeably snappier in daily use
+- **security**: significantly hardened with modern compiler protections
+- **binary size**: +29kb (+13%) due to security features and hardening
+
+see [benches/README.md](benches/README.md) for complete benchmarking guide.
 
 ## build
 

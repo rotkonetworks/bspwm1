@@ -1,0 +1,58 @@
+{
+  "current_basic_queries": {
+    "mean": 1655.9755,
+    "stdev": 127.00926119731488,
+    "min": 1411.126,
+    "max": 2203.036,
+    "samples": 50
+  },
+  "current_repeated_queries": {
+    "mean": 2577.206,
+    "stdev": 371.33594667742085,
+    "min": 2092.928,
+    "max": 3842.214,
+    "samples": 50
+  },
+  "current_config_queries": {
+    "mean": 2575.2032600000002,
+    "stdev": 392.80316713402766,
+    "min": 2047.903,
+    "max": 3888.452,
+    "samples": 50
+  },
+  "current_mixed_workload": {
+    "mean": 3342.97734,
+    "stdev": 185.8146840798605,
+    "min": 2979.819,
+    "max": 3803.881,
+    "samples": 50
+  },
+  "upstream_basic_queries": {
+    "mean": 1669.2535,
+    "stdev": 114.1842944304585,
+    "min": 1511.386,
+    "max": 1996.595,
+    "samples": 50
+  },
+  "upstream_repeated_queries": {
+    "mean": 2522.52082,
+    "stdev": 279.01896506566334,
+    "min": 2172.628,
+    "max": 3714.742,
+    "samples": 50
+  },
+  "upstream_config_queries": {
+    "mean": 2477.17534,
+    "stdev": 201.8749616124419,
+    "min": 1997.897,
+    "max": 3001.41,
+    "samples": 50
+  },
+  "upstream_mixed_workload": {
+    "mean": 3332.97072,
+    "stdev": 153.99944732912226,
+    "min": 3053.329,
+    "max": 3652.195,
+    "samples": 50
+  }
+}

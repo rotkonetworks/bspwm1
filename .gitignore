@@ -1,5 +1,51 @@
+# Build artifacts
 tags
 bspwm
 bspc
 *.o
 tests/test_window
+
+# Benchmark artifacts and temporary files
+# Upstream comparison binaries
+bspwm-*
+bspc-*
+
+# Benchmark result files
+*-bench-results.txt
+*-bench-results.json
+bench_*.json
+isolated_bench_*.json
+optimization_bench_*.json
+performance-comparison.md
+
+# Microbenchmark binaries
+benches/microbench
+benches/microbench-*
+
+# Temporary analysis files
+syscall_analysis.json
+*.log
+
+# Backup/temporary files
+*~
+*.bak
+*.tmp
+.#*
+#*#
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-*
+
+# Runtime files
+*.pid
+core
+core.*

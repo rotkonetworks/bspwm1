@@ -207,29 +207,82 @@ class BspwmBenchmark:
 if __name__ == "__main__":
     bench = BspwmBenchmark()
 
-    # Check if we have both versions
-    current_binary = "./bspwm"
-    original_binary = "./bspwm-0.9.10"  # We'll build this
+    # Auto-detect binaries
+    current_binary = "../bspwm"
+    upstream_binary = "../bspwm-0.9.12"
+
+    # Check if binaries exist
+    if not os.path.exists(current_binary):
+        print(f"Error: {current_binary} not found. Run 'make' in project root first.")
+        sys.exit(1)
 
     if len(sys.argv) > 1:
         if sys.argv[1] == "current":
+            if not os.path.exists(current_binary):
+                print(f"Error: {current_binary} not found")
+                sys.exit(1)
             bench.run_benchmarks("current", current_binary)
             bench.save_results("bench_current.json")
-        elif sys.argv[1] == "original":
-            bench.run_benchmarks("original", original_binary)
-            bench.save_results("bench_original.json")
+
+        elif sys.argv[1] == "upstream":
+            if not os.path.exists(upstream_binary):
+                print(f"Error: {upstream_binary} not found. Run benchmark suite first.")
+                sys.exit(1)
+            bench.run_benchmarks("upstream", upstream_binary)
+            bench.save_results("bench_upstream.json")
+
         elif sys.argv[1] == "compare":
             # Load previous results and compare
             try:
                 with open("bench_current.json", 'r') as f:
                     current_results = json.load(f)
-                with open("bench_original.json", 'r') as f:
-                    original_results = json.load(f)
+                with open("bench_upstream.json", 'r') as f:
+                    upstream_results = json.load(f)
 
                 bench.results.update(current_results)
-                bench.results.update(original_results)
-                bench.compare_results("original", "current")
-            except FileNotFoundError:
-                print("Run 'python3 bench.py current' and 'python3 bench.py original' first")
+                bench.results.update(upstream_results)
+                bench.compare_results("upstream", "current")
+            except FileNotFoundError as e:
+                print(f"Error: {e}")
+                print("Run 'python3 bench.py current' and 'python3 bench.py upstream' first")
+                sys.exit(1)
+
+        elif sys.argv[1] == "all":
+            # Run complete benchmark suite
+            print("=== Running Complete Benchmark Suite ===\n")
+
+            # Current version
+            if os.path.exists(current_binary):
+                bench.run_benchmarks("current", current_binary)
+                bench.save_results("bench_current.json")
+            else:
+                print(f"Warning: {current_binary} not found, skipping current benchmark")
+
+            # Upstream version
+            if os.path.exists(upstream_binary):
+                bench.run_benchmarks("upstream", upstream_binary)
+                bench.save_results("bench_upstream.json")
+            else:
+                print(f"Warning: {upstream_binary} not found, skipping upstream benchmark")
+
+            # Compare if both exist
+            if os.path.exists("bench_current.json") and os.path.exists("bench_upstream.json"):
+                print("\n=== Comparison Results ===")
+                with open("bench_current.json", 'r') as f:
+                    current_results = json.load(f)
+                with open("bench_upstream.json", 'r') as f:
+                    upstream_results = json.load(f)
+                bench.results.update(current_results)
+                bench.results.update(upstream_results)
+                bench.compare_results("upstream", "current")
+        else:
+            print(f"Unknown command: {sys.argv[1]}")
+            sys.exit(1)
     else:
-        print("Usage: python3 bench.py [current|original|compare]")
+        print("Usage: python3 bench.py [current|upstream|compare|all]")
+        print("")
+        print("Commands:")
+        print("  current   - Benchmark current bspwm version")
+        print("  upstream  - Benchmark upstream bspwm version")
+        print("  compare   - Compare previous benchmark results")
+        print("  all       - Run complete benchmark suite")
