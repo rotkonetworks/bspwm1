@@ -489,10 +489,17 @@ xcb_rectangle_t get_window_rectangle(node_t *n)
 {
 	client_t *c = n->client;
 	if (c != NULL) {
+		/* Check cache first to avoid X11 round-trip */
+		xcb_rectangle_t cached;
+		if (get_cached_geometry(n->id, &cached)) {
+			return cached;
+		}
+		/* Cache miss - do X11 call and cache result */
 		xcb_get_geometry_reply_t *g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, n->id), NULL);
 		if (g != NULL) {
 			xcb_rectangle_t rect = (xcb_rectangle_t) {g->x, g->y, g->width, g->height};
 			free(g);
+			cache_geometry(n->id, rect);
 			return rect;
 		}
 	}

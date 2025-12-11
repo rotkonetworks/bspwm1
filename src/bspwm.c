@@ -254,6 +254,7 @@ int main(int argc, char *argv[])
 					FILE *rsp = fdopen(cli_fd, "w");
 					if (rsp != NULL) {
 						handle_message(msg, n, rsp);
+						scratch_reset();  /* Free all temp allocations */
 					} else {
 						warn("Can't open the client socket as file.\n");
 						close(cli_fd);
@@ -263,11 +264,13 @@ int main(int argc, char *argv[])
 
 			if (FD_ISSET(dpy_fd, &descriptors)) {
 				xcb_aux_sync(dpy);
+				/* Process all pending events */
 				while ((event = xcb_poll_for_event(dpy)) != NULL) {
-					animation_tick();
 					handle_event(event);
 					free(event);
 				}
+				/* Tick animation once per batch, not per event */
+				animation_tick();
 			}
 
 		}
@@ -292,6 +295,7 @@ int main(int argc, char *argv[])
 	}
 
 	cleanup();
+	scratch_destroy();  /* Free arena memory */
 	ungrab_buttons();
 	xcb_ewmh_connection_wipe(ewmh);
 	xcb_destroy_window(dpy, meta_window);
@@ -358,6 +362,7 @@ void init(void)
 void setup(void)
 {
 	init();
+	scratch_init();  /* Arena for temporary allocations */
 	ewmh_init();
 	pointer_init();
 	animation_init();

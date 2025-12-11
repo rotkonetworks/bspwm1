@@ -46,51 +46,43 @@
 
 void handle_message(char *msg, int msg_len, FILE *rsp)
 {
-	size_t cap = INIT_CAP;
+	/*
+	 * Use scratch arena for args - no need to free on error paths.
+	 * scratch_reset() is called after handle_message() returns.
+	 * Pre-allocate 256 slots (2KB) - enough for any reasonable command.
+	 */
+	#define MAX_ARGS 256
 	int num = 0;
-	char **args = safe_calloc(cap, sizeof(char *));
+	char **args = scratch_alloc(MAX_ARGS * sizeof(char *));
 
 	if (args == NULL) {
-		perror("Handle message: calloc");
+		perror("Handle message: scratch_alloc");
 		return;
 	}
 
 	for (int i = 0, j = 0; i < msg_len; i++) {
 		if (msg[i] == 0) {
 			if (j >= msg_len) {
-				free(args);
+				/* No free needed - scratch_reset handles it */
 				perror("Handle message: buffer overflow");
+				return;
+			}
+			if (num >= MAX_ARGS) {
+				fail(rsp, "Too many arguments.\n");
 				return;
 			}
 			args[num++] = msg + j;
 			j = i + 1;
 		}
-		if ((size_t)num >= cap) {
-			if (!safe_double(&cap)) {
-				free(args);
-				perror("Handle message: capacity overflow");
-				return;
-			}
-			char **new = safe_realloc_array(args, cap, sizeof(char *));
-			if (new == NULL) {
-				free(args);
-				args = NULL;
-				perror("Handle message: realloc");
-				return;
-			}
-			args = new;
-		}
 	}
 
 	if (num < 1) {
-		free(args);
 		fail(rsp, "No arguments given.\n");
 		return;
 	}
 
-	char **args_orig = args;
 	process_message(args, num, rsp);
-	free(args_orig);
+	/* No free needed - scratch_reset() called after this function */
 }
 
 typedef struct {
@@ -1020,9 +1012,6 @@ void cmd_query(char **args, int num, FILE *rsp)
 				monitor_ref.node = NULL;
 				if ((ret = monitor_from_desc(*args, &tmp, &monitor_ref)) != SELECTOR_OK) {
 					handle_failure(ret, "query -M", *args, rsp);
-					free(monitor_sel);
-					free(desktop_sel);
-					free(node_sel);
 					goto end;
 				}
 			}
@@ -1035,9 +1024,6 @@ void cmd_query(char **args, int num, FILE *rsp)
 				desktop_ref.node = NULL;
 				if ((ret = desktop_from_desc(*args, &tmp, &desktop_ref)) != SELECTOR_OK) {
 					handle_failure(ret, "query -D", *args, rsp);
-					free(monitor_sel);
-					free(desktop_sel);
-					free(node_sel);
 					goto end;
 				}
 			}
@@ -1049,9 +1035,6 @@ void cmd_query(char **args, int num, FILE *rsp)
 				coordinates_t tmp = node_ref;
 				if ((ret = node_from_desc(*args, &tmp, &node_ref)) != SELECTOR_OK) {
 					handle_failure(ret, "query -N", *args, rsp);
-					free(monitor_sel);
-					free(desktop_sel);
-					free(node_sel);
 					goto end;
 				}
 			}
@@ -1060,24 +1043,20 @@ void cmd_query(char **args, int num, FILE *rsp)
 				num--, args++;
 				int ret;
 				if ((*args)[0] == '.') {
-					free(monitor_sel);
-					monitor_sel = malloc(sizeof(monitor_select_t));
+					/* Scratch arena - no free needed, reset after command */
+					monitor_sel = scratch_alloc(sizeof(monitor_select_t));
+					if (monitor_sel == NULL) goto end;
 					*monitor_sel = make_monitor_select();
-					char *desc = copy_string(*args, strlen(*args));
+					size_t desc_len = strlen(*args);
+					char *desc = scratch_alloc(desc_len + 1);
+					if (desc == NULL) goto end;
+					memcpy(desc, *args, desc_len + 1);
 					if (!parse_monitor_modifiers(desc, monitor_sel)) {
 						handle_failure(SELECTOR_BAD_MODIFIERS, "query -m", *args, rsp);
-						free(monitor_sel);
-						free(desktop_sel);
-						free(node_sel);
-						free(desc);
 						goto end;
 					}
-					free(desc);
 				} else if ((ret = monitor_from_desc(*args, &monitor_ref, &trg)) != SELECTOR_OK) {
 					handle_failure(ret, "query -m", *args, rsp);
-					free(monitor_sel);
-					free(desktop_sel);
-					free(node_sel);
 					goto end;
 				}
 			} else {
@@ -1088,24 +1067,20 @@ void cmd_query(char **args, int num, FILE *rsp)
 				num--, args++;
 				int ret;
 				if ((*args)[0] == '.') {
-					free(desktop_sel);
-					desktop_sel = malloc(sizeof(desktop_select_t));
+					/* Scratch arena - no free needed, reset after command */
+					desktop_sel = scratch_alloc(sizeof(desktop_select_t));
+					if (desktop_sel == NULL) goto end;
 					*desktop_sel = make_desktop_select();
-					char *desc = copy_string(*args, strlen(*args));
+					size_t desc_len = strlen(*args);
+					char *desc = scratch_alloc(desc_len + 1);
+					if (desc == NULL) goto end;
+					memcpy(desc, *args, desc_len + 1);
 					if (!parse_desktop_modifiers(desc, desktop_sel)) {
 						handle_failure(SELECTOR_BAD_MODIFIERS, "query -d", *args, rsp);
-						free(desktop_sel);
-						free(monitor_sel);
-						free(node_sel);
-						free(desc);
 						goto end;
 					}
-					free(desc);
 				} else if ((ret = desktop_from_desc(*args, &desktop_ref, &trg)) != SELECTOR_OK) {
 					handle_failure(ret, "query -d", *args, rsp);
-					free(desktop_sel);
-					free(monitor_sel);
-					free(node_sel);
 					goto end;
 				}
 			} else {
@@ -1116,24 +1091,20 @@ void cmd_query(char **args, int num, FILE *rsp)
 				num--, args++;
 				int ret;
 				if ((*args)[0] == '.') {
-					free(node_sel);
-					node_sel = malloc(sizeof(node_select_t));
+					/* Scratch arena - no free needed, reset after command */
+					node_sel = scratch_alloc(sizeof(node_select_t));
+					if (node_sel == NULL) goto end;
 					*node_sel = make_node_select();
-					char *desc = copy_string(*args, strlen(*args));
+					size_t desc_len = strlen(*args);
+					char *desc = scratch_alloc(desc_len + 1);
+					if (desc == NULL) goto end;
+					memcpy(desc, *args, desc_len + 1);
 					if (!parse_node_modifiers(desc, node_sel)) {
 						handle_failure(SELECTOR_BAD_MODIFIERS, "query -n", *args, rsp);
-						free(node_sel);
-						free(monitor_sel);
-						free(desktop_sel);
-						free(desc);
 						goto end;
 					}
-					free(desc);
 				} else if ((ret = node_from_desc(*args, &node_ref, &trg)) != SELECTOR_OK) {
 					handle_failure(ret, "query -n", *args, rsp);
-					free(node_sel);
-					free(monitor_sel);
-					free(desktop_sel);
 					goto end;
 				}
 			} else {
@@ -1202,9 +1173,8 @@ void cmd_query(char **args, int num, FILE *rsp)
 	}
 
 end:
-	free(monitor_sel);
-	free(desktop_sel);
-	free(node_sel);
+	/* Scratch arena handles cleanup via scratch_reset() after handle_message() */
+	return;
 }
 
 void cmd_rule(char **args, int num, FILE *rsp)

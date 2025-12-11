@@ -126,8 +126,8 @@ static inline __attribute__((warn_unused_result)) bool safe_double(size_t *val) 
 	} while (false)
 
 
-__attribute__((format(printf, 1, 2))) void warn(char *fmt, ...);
-__attribute__((format(printf, 1, 2), noreturn)) void err(char *fmt, ...);
+__attribute__((cold, format(printf, 1, 2))) void warn(char *fmt, ...);
+__attribute__((cold, format(printf, 1, 2), noreturn)) void err(char *fmt, ...);
 void secure_memzero(void *ptr, size_t len);
 __attribute__((warn_unused_result)) char *read_string(const char *file_path, size_t *tlen);
 __attribute__((warn_unused_result)) char *copy_string(char *str, size_t len);
@@ -142,5 +142,23 @@ struct tokenize_state {
 	size_t len;
 };
 __attribute__((warn_unused_result)) char *tokenize_with_escape(struct tokenize_state *state, const char *s, char sep);
+
+/*
+ * Scratch arena - bump allocator for temporary allocations.
+ * Reset after each command cycle to "free" all at once.
+ * Prevents leaks in complex parsing paths.
+ */
+#define SCRATCH_ARENA_SIZE (64 * 1024)  /* 64KB - enough for any command */
+
+typedef struct {
+	char *base;
+	size_t offset;
+	size_t capacity;
+} scratch_arena_t;
+
+void scratch_init(void);
+void scratch_destroy(void);
+void scratch_reset(void);  /* "free" all allocations */
+__attribute__((warn_unused_result, malloc)) void *scratch_alloc(size_t size);
 
 #endif

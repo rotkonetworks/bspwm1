@@ -23,10 +23,55 @@
  */
 /* geometry.c */
 #include <stdint.h>
+#include <string.h>
 #include <limits.h>
 #include "types.h"
 #include "settings.h"
 #include "geometry.h"
+
+#ifdef __SSE2__
+#include <emmintrin.h>
+#define HAVE_SSE2 1
+#endif
+
+#ifdef __SSE4_1__
+#include <smmintrin.h>
+#define HAVE_SSE41 1
+#endif
+
+/*
+ * Batch is_inside check - test point against 2 rectangles simultaneously
+ * Returns bitmask: bit 0 = inside rect[0], bit 1 = inside rect[1]
+ */
+#ifdef HAVE_SSE2
+int is_inside_batch2(xcb_point_t p, const xcb_rectangle_t rects[2])
+{
+	/* Load point as {px, py, px, py} */
+	__m128i point = _mm_set_epi32(p.y, p.x, p.y, p.x);
+
+	/* Load rect mins as {r0.x, r0.y, r1.x, r1.y} */
+	__m128i mins = _mm_set_epi32(rects[1].y, rects[1].x, rects[0].y, rects[0].x);
+
+	/* Load rect maxs as {r0.x+w, r0.y+h, r1.x+w, r1.y+h} */
+	__m128i maxs = _mm_set_epi32(
+		rects[1].y + rects[1].height,
+		rects[1].x + rects[1].width,
+		rects[0].y + rects[0].height,
+		rects[0].x + rects[0].width
+	);
+
+	/* point >= mins AND point < maxs */
+	__m128i ge_min = _mm_cmpgt_epi32(point, _mm_sub_epi32(mins, _mm_set1_epi32(1)));
+	__m128i lt_max = _mm_cmplt_epi32(point, maxs);
+	__m128i inside = _mm_and_si128(ge_min, lt_max);
+
+	/* Extract results - need both x and y conditions true */
+	int mask = _mm_movemask_ps(_mm_castsi128_ps(inside));
+	int r0 = (mask & 0x3) == 0x3 ? 1 : 0;  /* bits 0,1 both set */
+	int r1 = (mask & 0xC) == 0xC ? 2 : 0;  /* bits 2,3 both set */
+	return r0 | r1;
+}
+#endif
 
 static inline bool valid_rect(xcb_rectangle_t r)
 {
@@ -152,10 +197,14 @@ bool on_dir_side(xcb_rectangle_t r1, xcb_rectangle_t r2, direction_t dir)
 	}
 }
 
+/* SIMD-style rect comparison - single 64-bit compare instead of 4 branches */
 bool rect_eq(xcb_rectangle_t a, xcb_rectangle_t b)
 {
-	return a.x == b.x && a.y == b.y &&
-	       a.width == b.width && a.height == b.height;
+	/* xcb_rectangle_t is exactly 8 bytes - compare as uint64_t */
+	uint64_t va, vb;
+	memcpy(&va, &a, sizeof(va));
+	memcpy(&vb, &b, sizeof(vb));
+	return va == vb;
 }
 
 int rect_cmp(xcb_rectangle_t r1, xcb_rectangle_t r2)

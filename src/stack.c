@@ -144,10 +144,11 @@ int stack_level(client_t *c)
 {
 	if (!c)
 		return 0;
-		
-	int layer_level = (c->layer == LAYER_NORMAL ? 1 : (c->layer == LAYER_BELOW ? 0 : 2));
-	int state_level = (IS_TILED(c) ? 0 : (IS_FLOATING(c) ? 1 : 2));
-	return 3 * layer_level + state_level;
+
+	/* Branchless lookup: layer enum is 0,1,2 which matches level directly.
+	 * State needs lookup: TILED=0, PSEUDO_TILED=0, FLOATING=1, FULLSCREEN=2 */
+	static const int8_t state_table[4] = {0, 0, 1, 2};
+	return 3 * c->layer + state_table[c->state];
 }
 
 int stack_cmp(client_t *c1, client_t *c2)
