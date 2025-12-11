@@ -310,26 +310,28 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		int len = rargc + 5;
-		char **rargv = malloc(len * sizeof(char *));
+		size_t len = (size_t)rargc + 5;
+		char **rargv = safe_malloc_array(len, sizeof(char *));
+		if (rargv != NULL) {
+			for (int i = 0; i < rargc; i++) {
+				rargv[i] = argv[i];
+			}
 
-		for (int i = 0; i < rargc; i++) {
-			rargv[i] = argv[i];
+			char sock_fd_arg[SMALEN];
+			snprintf(sock_fd_arg, sizeof(sock_fd_arg), "%i", sock_fd);
+
+			rargv[rargc] = "-s";
+			rargv[rargc + 1] = state_path;
+			rargv[rargc + 2] = "-o";
+			rargv[rargc + 3] = sock_fd_arg;
+			rargv[rargc + 4] = 0;
+
+			execvp(*rargv, rargv);
+			free(rargv);
+		} else {
+			warn("Failed to allocate restart argv\n");
 		}
-
-		char sock_fd_arg[SMALEN];
-		snprintf(sock_fd_arg, sizeof(sock_fd_arg), "%i", sock_fd);
-
-		rargv[rargc] = "-s";
-		rargv[rargc + 1] = state_path;
-		rargv[rargc + 2] = "-o";
-		rargv[rargc + 3] = sock_fd_arg;
-		rargv[rargc + 4] = 0;
-
-		execvp(*rargv, rargv);
-
 		exit_status = 1;
-		free(rargv);
 	}
 
 	close(sock_fd);

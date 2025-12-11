@@ -28,6 +28,7 @@
 #include <xcb/xcb.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <float.h>
@@ -35,6 +36,10 @@
 #define LENGTH(x)         (sizeof(x) / sizeof(*x))
 #define MAX(A, B)         ((A) > (B) ? (A) : (B))
 #define MIN(A, B)         ((A) < (B) ? (A) : (B))
+
+/* Branch prediction hints (Tunney-style) */
+#define likely(x)         __builtin_expect(!!(x), 1)
+#define unlikely(x)       __builtin_expect(!!(x), 0)
 
 #define IS_TILED(c)       (c->state == STATE_TILED || c->state == STATE_PSEUDO_TILED)
 #define IS_FLOATING(c)    (c->state == STATE_FLOATING)
@@ -73,6 +78,40 @@
 #define SMALEN     32
 #define INIT_CAP    8
 #define MAX_STRING_SIZE (1024 * 1024)
+
+/* Overflow-safe allocation size calculation (Micay-style) */
+#define SIZE_MAX_HALF (SIZE_MAX / 2)
+
+/* Check if multiplication would overflow before allocating */
+static inline __attribute__((warn_unused_result)) void *safe_calloc(size_t nmemb, size_t size) {
+	if (nmemb && size > SIZE_MAX / nmemb) {
+		return NULL;  /* overflow */
+	}
+	return calloc(nmemb, size);
+}
+
+static inline __attribute__((warn_unused_result)) void *safe_malloc_array(size_t nmemb, size_t size) {
+	if (nmemb && size > SIZE_MAX / nmemb) {
+		return NULL;  /* overflow */
+	}
+	return malloc(nmemb * size);
+}
+
+static inline __attribute__((warn_unused_result)) void *safe_realloc_array(void *ptr, size_t nmemb, size_t size) {
+	if (nmemb && size > SIZE_MAX / nmemb) {
+		return NULL;  /* overflow */
+	}
+	return realloc(ptr, nmemb * size);
+}
+
+/* Safe doubling with overflow check */
+static inline __attribute__((warn_unused_result)) bool safe_double(size_t *val) {
+	if (*val > SIZE_MAX_HALF) {
+		return false;  /* would overflow */
+	}
+	*val *= 2;
+	return true;
+}
 
 
 #define cleaned_mask(m)   (m & ~(num_lock | scroll_lock | caps_lock))

@@ -1080,7 +1080,7 @@ node_list_t *collect_leaves(node_t *root)
 
 	list->capacity = 64;
 	list->count = 0;
-	list->nodes = malloc(list->capacity * sizeof(node_t*));
+	list->nodes = safe_malloc_array(list->capacity, sizeof(node_t*));
 	if (!list->nodes) {
 		free(list);
 		return NULL;
@@ -1096,8 +1096,9 @@ node_list_t *collect_leaves(node_t *root)
 
 		if (is_leaf(n)) {
 			if (list->count >= list->capacity) {
-				size_t new_cap = list->capacity * 2;
-				node_t **new_nodes = realloc(list->nodes, new_cap * sizeof(node_t*));
+				size_t new_cap = list->capacity;
+				if (!safe_double(&new_cap)) break;  /* overflow protection */
+				node_t **new_nodes = safe_realloc_array(list->nodes, new_cap, sizeof(node_t*));
 				if (!new_nodes) break;
 				list->nodes = new_nodes;
 				list->capacity = new_cap;

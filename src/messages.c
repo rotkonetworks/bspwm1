@@ -46,9 +46,9 @@
 
 void handle_message(char *msg, int msg_len, FILE *rsp)
 {
-	int cap = INIT_CAP;
+	size_t cap = INIT_CAP;
 	int num = 0;
-	char **args = calloc(cap, sizeof(char *));
+	char **args = safe_calloc(cap, sizeof(char *));
 
 	if (args == NULL) {
 		perror("Handle message: calloc");
@@ -65,17 +65,20 @@ void handle_message(char *msg, int msg_len, FILE *rsp)
 			args[num++] = msg + j;
 			j = i + 1;
 		}
-		if (num >= cap) {
-			cap *= 2;
-			char **new = realloc(args, cap * sizeof(char *));
+		if ((size_t)num >= cap) {
+			if (!safe_double(&cap)) {
+				free(args);
+				perror("Handle message: capacity overflow");
+				return;
+			}
+			char **new = safe_realloc_array(args, cap, sizeof(char *));
 			if (new == NULL) {
 				free(args);
 				args = NULL;
 				perror("Handle message: realloc");
 				return;
-			} else {
-				args = new;
 			}
+			args = new;
 		}
 	}
 

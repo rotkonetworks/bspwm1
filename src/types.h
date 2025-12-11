@@ -224,22 +224,29 @@ struct icccm_props_t {
 };
 
 typedef struct {
+	/* HOT fields - first cache line (64 bytes) - accessed on every operation */
+	client_state_t state;              /* 1 byte */
+	client_state_t last_state;         /* 1 byte */
+	stack_layer_t layer;               /* 1 byte */
+	stack_layer_t last_layer;          /* 1 byte */
+	unsigned int border_width;         /* 4 bytes - offset 4 */
+	xcb_rectangle_t floating_rectangle;/* 8 bytes - offset 8 */
+	xcb_rectangle_t tiled_rectangle;   /* 8 bytes - offset 16 */
+	bool urgent;                       /* 1 byte - offset 24 */
+	bool shown;                        /* 1 byte - offset 25 */
+	honor_size_hints_mode_t honor_size_hints; /* 1 byte - offset 26 */
+	/* padding to 28, then wm_flags */
+	wm_flags_t wm_flags;               /* 2 bytes - offset 28 */
+	icccm_props_t icccm_props;         /* 3 bytes - offset 30 */
+	/* ~33 bytes hot data in first cache line */
+
+	/* WARM fields - size hints used during resize */
+	xcb_size_hints_t size_hints;
+
+	/* COLD fields - only accessed during window creation/rule matching */
 	char class_name[MAX_CLASS_NAME_LEN];
 	char instance_name[MAX_INSTANCE_NAME_LEN];
 	char name[MAXLEN];
-	unsigned int border_width;
-	bool urgent;
-	bool shown;
-	client_state_t state;
-	client_state_t last_state;
-	stack_layer_t layer;
-	stack_layer_t last_layer;
-	xcb_rectangle_t floating_rectangle;
-	xcb_rectangle_t tiled_rectangle;
-	honor_size_hints_mode_t honor_size_hints;
-	xcb_size_hints_t size_hints;
-	icccm_props_t icccm_props;
-	wm_flags_t wm_flags;
 } client_t;
 
 #define GEOMETRY_CACHE_SIZE 32

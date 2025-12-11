@@ -39,6 +39,9 @@
 rule_t *make_rule(void)
 {
 	rule_t *r = calloc(1, sizeof(rule_t));
+	if (r == NULL) {
+		return NULL;
+	}
 	r->class_name[0] = r->instance_name[0] = r->name[0] = r->effect[0] = '\0';
 	r->next = r->prev = NULL;
 	r->one_shot = false;
@@ -139,6 +142,9 @@ bool remove_rule_by_index(int idx)
 rule_consequence_t *make_rule_consequence(void)
 {
 	rule_consequence_t *rc = calloc(1, sizeof(rule_consequence_t));
+	if (rc == NULL) {
+		return NULL;
+	}
 	rc->manage = rc->focus = rc->border = true;
 	rc->layer = NULL;
 	rc->state = NULL;
@@ -150,6 +156,9 @@ rule_consequence_t *make_rule_consequence(void)
 pending_rule_t *make_pending_rule(int fd, xcb_window_t win, rule_consequence_t *csq)
 {
 	pending_rule_t *pr = calloc(1, sizeof(pending_rule_t));
+	if (pr == NULL) {
+		return NULL;
+	}
 	pr->prev = pr->next = NULL;
 	pr->event_head = pr->event_tail = NULL;
 	pr->fd = fd;

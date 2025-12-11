@@ -37,6 +37,9 @@
 subscriber_list_t *make_subscriber(FILE *stream, char *fifo_path, int field, int count)
 {
 	subscriber_list_t *sb = calloc(1, sizeof(subscriber_list_t));
+	if (sb == NULL) {
+		return NULL;
+	}
 	sb->prev = sb->next = NULL;
 	sb->stream = stream;
 	sb->fifo_path = fifo_path;

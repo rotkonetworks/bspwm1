@@ -32,6 +32,9 @@
 history_t *make_history(monitor_t *m, desktop_t *d, node_t *n)
 {
 	history_t *h = calloc(1, sizeof(history_t));
+	if (h == NULL) {
+		return NULL;
+	}
 	h->loc = (coordinates_t) {m, d, n};
 	h->prev = h->next = NULL;
 	h->latest = true;
@@ -49,6 +52,9 @@ void history_add(monitor_t *m, desktop_t *d, node_t *n, bool focused)
 	}
 
 	history_t *h = make_history(m, d, n);
+	if (h == NULL) {
+		return;
+	}
 
 	if (history_head == NULL) {
 		history_head = history_tail = h;

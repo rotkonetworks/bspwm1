@@ -50,9 +50,9 @@ bool restore_state(const char *file_path)
 		return false;
 	}
 
-	int nbtok = 256;
+	size_t nbtok = 256;
 	jsmn_parser parser;
-	jsmntok_t *tokens = malloc(nbtok * sizeof(jsmntok_t));
+	jsmntok_t *tokens = safe_malloc_array(nbtok, sizeof(jsmntok_t));
 
 	if (tokens == NULL) {
 		perror("Restore tree: malloc");
@@ -63,17 +63,21 @@ bool restore_state(const char *file_path)
 	jsmn_init(&parser);
 	int ret;
 
-	while ((ret = jsmn_parse(&parser, json, jslen, tokens, nbtok)) == JSMN_ERROR_NOMEM) {
-		nbtok *= 2;
-		jsmntok_t *rtokens = realloc(tokens, nbtok * sizeof(jsmntok_t));
+	while ((ret = jsmn_parse(&parser, json, jslen, tokens, (unsigned int)nbtok)) == JSMN_ERROR_NOMEM) {
+		if (!safe_double(&nbtok)) {
+			warn("Restore tree: token count overflow\n");
+			free(tokens);
+			free(json);
+			return false;
+		}
+		jsmntok_t *rtokens = safe_realloc_array(tokens, nbtok, sizeof(jsmntok_t));
 		if (rtokens == NULL) {
 			perror("Restore tree: realloc");
 			free(tokens);
 			free(json);
 			return false;
-		} else {
-			tokens = rtokens;
 		}
+		tokens = rtokens;
 	}
 
 	if (ret < 0) {
