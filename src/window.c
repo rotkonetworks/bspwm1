@@ -35,7 +35,6 @@
 #include "query.h"
 #include "rule.h"
 #include "settings.h"
-#include "animation.h"
 
 uint64_t get_time_ms(void)
 {
@@ -251,8 +250,6 @@ void unmanage_window(xcb_window_t win)
 {
 	coordinates_t loc;
 	if (locate_window(win, &loc)) {
-		// stop any ongoing animations for this window
-		animation_stop_window(win);
 		put_status(SBSC_MASK_NODE_REMOVE, "node_remove 0x%08X 0x%08X 0x%08X\n", loc.monitor->id, loc.desktop->id, win);
 		remove_node(loc.monitor, loc.desktop, loc.node);
 		arrange(loc.monitor, loc.desktop);
@@ -545,13 +542,7 @@ bool move_client(coordinates_t *loc, int dx, int dy)
 		int16_t x = rect.x + dx;
 		int16_t y = rect.y + dy;
 
-		// use animation for floating window movement
-		if (animation_enabled && !grabbing) {
-			xcb_rectangle_t new_rect = {x, y, rect.width, rect.height};
-			animate_window(n->id, new_rect);
-		} else {
-			window_move(n->id, x, y);
-		}
+		window_move(n->id, x, y);
 
 		c->floating_rectangle.x = x;
 		c->floating_rectangle.y = y;
@@ -650,13 +641,7 @@ bool resize_client(coordinates_t *loc, resize_handle_t rh, int dx, int dy, bool 
 		}
 		n->client->floating_rectangle = (xcb_rectangle_t) {x, y, width, height};
 		if (n->client->state == STATE_FLOATING) {
-			// use animation for floating window resize
-			if (animation_enabled && !grabbing) {
-				xcb_rectangle_t new_rect = {x, y, width, height};
-				animate_window(n->id, new_rect);
-			} else {
-				window_move_resize(n->id, x, y, width, height);
-			}
+			window_move_resize(n->id, x, y, width, height);
 
 			if (!grabbing) {
 				put_status(SBSC_MASK_NODE_GEOMETRY, "node_geometry 0x%08X 0x%08X 0x%08X %ux%u+%i+%i\n", loc->monitor->id, loc->desktop->id, loc->node->id, width, height, x, y);

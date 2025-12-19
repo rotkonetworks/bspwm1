@@ -74,9 +74,10 @@ bool merge_overlapping_monitors;
 bool tile_limit_enabled;
 int max_tiles_per_desktop;
 
-// Animation settings
-bool animation_enabled;
-uint64_t animation_duration;
+/* Windows-like snap behavior */
+bool edge_snap_enabled;
+int edge_snap_threshold;
+bool raise_floating_on_click;
 
 void run_config(int run_level)
 {
@@ -142,7 +143,8 @@ void load_settings(void)
 	tile_limit_enabled = TILE_LIMIT_ENABLED;
 	max_tiles_per_desktop = MAX_TILES_PER_DESKTOP;
 
-	// animation defaults - snappy feel
-	animation_enabled = false;  // default OFF as discussed
-	animation_duration = 5;     // 5ms for very fast animations
+	/* Windows-like snap behavior */
+	edge_snap_enabled = EDGE_SNAP_ENABLED;
+	edge_snap_threshold = EDGE_SNAP_THRESHOLD;
+	raise_floating_on_click = RAISE_FLOATING_ON_CLICK;
 }

@@ -46,4 +46,11 @@ resize_handle_t get_handle(node_t *n, xcb_point_t pos, pointer_action_t pac);
 bool grab_pointer(pointer_action_t pac);
 void track_pointer(coordinates_t loc, pointer_action_t pac, xcb_point_t pos);
 
+/* Windows-like edge snap */
+snap_zone_t get_snap_zone(xcb_point_t pos, monitor_t *m);
+void apply_snap_zone(coordinates_t *loc, monitor_t *target_monitor, snap_zone_t zone);
+void show_snap_preview(monitor_t *m, snap_zone_t zone);
+void hide_snap_preview(void);
+void destroy_snap_preview(void);
+
 #endif

@@ -51,7 +51,6 @@
 #include "rule.h"
 #include "restore.h"
 #include "query.h"
-#include "animation.h"
 #include "bspwm.h"
 
 xcb_connection_t *dpy;
@@ -269,8 +268,6 @@ int main(int argc, char *argv[])
 					handle_event(event);
 					free(event);
 				}
-				/* Tick animation once per batch, not per event */
-				animation_tick();
 			}
 
 		}
@@ -365,7 +362,6 @@ void setup(void)
 	scratch_init();  /* Arena for temporary allocations */
 	ewmh_init();
 	pointer_init();
-	animation_init();
 
 	screen = xcb_setup_roots_iterator(xcb_get_setup(dpy)).data;
 
@@ -493,8 +489,6 @@ void register_events(void)
 void cleanup(void)
 {
 	mon = NULL;
-
-	animation_cleanup();
 
 	while (mon_head != NULL) {
 		remove_monitor(mon_head);

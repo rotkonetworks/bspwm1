@@ -42,7 +42,6 @@
 #include "common.h"
 #include "parse.h"
 #include "messages.h"
-#include "animation.h"
 
 void handle_message(char *msg, int msg_len, FILE *rsp)
 {
@@ -1824,22 +1823,6 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 		SET_BOOL(center_pseudo_tiled)
 		SET_BOOL(removal_adjustment)
 #undef SET_BOOL
-	} else if (streq("animation_enabled", name)) {
-		bool b;
-		if (parse_bool(value, &b)) {
-			animation_set_enabled(b);
-		} else {
-			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
-			return;
-		}
-	} else if (streq("animation_duration", name)) {
-		uint64_t ms;
-		if (sscanf(value, "%lu", &ms) == 1) {
-			animation_set_duration(ms);
-		} else {
-			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
-			return;
-		}
 	} else if (streq("tile_limit_enabled", name)) {
 		bool b;
 		if (!parse_bool(value, &b)) {
@@ -1890,6 +1873,27 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 				d->max_tiles_per_desktop = limit;
 			}
 		}
+	} else if (streq("edge_snap_enabled", name)) {
+		bool b;
+		if (!parse_bool(value, &b)) {
+			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
+			return;
+		}
+		edge_snap_enabled = b;
+	} else if (streq("edge_snap_threshold", name)) {
+		int t;
+		if (sscanf(value, "%i", &t) != 1 || t < 1 || t > 100) {
+			fail(rsp, "config: %s: Invalid value: '%s' (must be 1-100).\n", name, value);
+			return;
+		}
+		edge_snap_threshold = t;
+	} else if (streq("raise_floating_on_click", name)) {
+		bool b;
+		if (!parse_bool(value, &b)) {
+			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
+			return;
+		}
+		raise_floating_on_click = b;
 #define SET_MON_BOOL(s) \
 	} else if (streq(#s, name)) { \
 		if (!parse_bool(value, &s)) { \
@@ -2025,10 +2029,6 @@ void get_setting(coordinates_t loc, char *name, FILE* rsp)
 	GET_BOOL(remove_unplugged_monitors)
 	GET_BOOL(merge_overlapping_monitors)
 #undef GET_BOOL
-	} else if (streq("animation_enabled", name)) {
-		fprintf(rsp, "%s", BOOL_STR(animation_enabled));
-	} else if (streq("animation_duration", name)) {
-		fprintf(rsp, "%lu", animation_duration);
 	} else if (streq("tile_limit_enabled", name)) {
 		if (loc.desktop != NULL) {
 			fprintf(rsp, "%s", BOOL_STR(loc.desktop->tile_limit_enabled));
@@ -2041,6 +2041,12 @@ void get_setting(coordinates_t loc, char *name, FILE* rsp)
 		} else {
 			fprintf(rsp, "%i", max_tiles_per_desktop);
 		}
+	} else if (streq("edge_snap_enabled", name)) {
+		fprintf(rsp, "%s", BOOL_STR(edge_snap_enabled));
+	} else if (streq("edge_snap_threshold", name)) {
+		fprintf(rsp, "%i", edge_snap_threshold);
+	} else if (streq("raise_floating_on_click", name)) {
+		fprintf(rsp, "%s", BOOL_STR(raise_floating_on_click));
 	} else {
 		fail(rsp, "config: Unknown setting: '%s'.\n", name);
 		return;

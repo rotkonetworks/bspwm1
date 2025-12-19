@@ -40,7 +40,6 @@
 #include "stack.h"
 #include "window.h"
 #include "tree.h"
-#include "animation.h"
 #include "rule.h"
 
 #define MAX_TREE_DEPTH 256
@@ -152,12 +151,7 @@ void apply_layout(monitor_t *m, desktop_t *d, node_t *n, xcb_rectangle_t rect, x
 		apply_size_hints(n->client, &r.width, &r.height);
 
 		if (!rect_eq(r, cr)) {
-			client_t *c = n->client;
-			if (animation_enabled && c != NULL && c->state == STATE_TILED) {
-				animate_window(n->id, r);
-			} else {
-				window_move_resize(n->id, r.x, r.y, r.width, r.height);
-			}
+			window_move_resize(n->id, r.x, r.y, r.width, r.height);
 			if (!grabbing) {
 				put_status(SBSC_MASK_NODE_GEOMETRY, "node_geometry 0x%08X 0x%08X 0x%08X %ux%u+%i+%i\n",
 			   m->id, d->id, n->id, r.width, r.height, r.x, r.y);
@@ -876,6 +870,9 @@ static void hide_node_bounded(desktop_t *d, node_t *n, int depth)
 		}
 	}
 	if (n->client) {
+		if (n->client->shown) {
+			warn("hide_node: 0x%08X shown=false (was true)\n", n->id);
+		}
 		n->client->shown = false;
 	}
 	hide_node_bounded(d, n->first_child, depth + 1);
@@ -902,6 +899,9 @@ static void show_node_bounded(desktop_t *d, node_t *n, int depth)
 		}
 	}
 	if (n->client) {
+		if (!n->client->shown) {
+			warn("show_node: 0x%08X shown=true (was false)\n", n->id);
+		}
 		n->client->shown = true;
 	}
 	show_node_bounded(d, n->first_child, depth + 1);

@@ -142,6 +142,20 @@ typedef enum pointer_action : unsigned char {
 	ACTION_RESIZE_CORNER
 } pointer_action_t;
 
+/* Windows-like edge snap zones */
+typedef enum snap_zone : unsigned char {
+	SNAP_NONE,
+	SNAP_LEFT,           /* Left half */
+	SNAP_RIGHT,          /* Right half */
+	SNAP_TOP,            /* Top half (rarely used) */
+	SNAP_BOTTOM,         /* Bottom half (rarely used) */
+	SNAP_TOP_LEFT,       /* Top-left quarter */
+	SNAP_TOP_RIGHT,      /* Top-right quarter */
+	SNAP_BOTTOM_LEFT,    /* Bottom-left quarter */
+	SNAP_BOTTOM_RIGHT,   /* Bottom-right quarter */
+	SNAP_MAXIMIZE        /* Fullscreen/maximize (top edge) */
+} snap_zone_t;
+
 typedef enum layout : unsigned char {
 	LAYOUT_TILED,
 	LAYOUT_MONOCLE

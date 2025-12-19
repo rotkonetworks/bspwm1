@@ -290,9 +290,10 @@ void *scratch_alloc(size_t size)
 	size_t aligned = (size + 7) & ~(size_t)7;
 
 	if (scratch.offset + aligned > scratch.capacity) {
-		/* Arena exhausted - fall back to malloc (caller must free) */
-		warn("Scratch arena exhausted, falling back to malloc\n");
-		return malloc(size);
+		/* Arena exhausted - return NULL, don't malloc (would leak) */
+		warn("Scratch arena exhausted (%zu/%zu), returning NULL\n",
+		     scratch.offset, scratch.capacity);
+		return NULL;
 	}
 
 	void *ptr = scratch.base + scratch.offset;

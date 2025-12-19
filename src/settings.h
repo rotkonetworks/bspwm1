@@ -71,6 +71,11 @@
 #define TILE_LIMIT_ENABLED          false
 #define MAX_TILES_PER_DESKTOP       8
 
+/* Windows-like snap behavior */
+#define EDGE_SNAP_ENABLED           true
+#define EDGE_SNAP_THRESHOLD         20
+#define RAISE_FLOATING_ON_CLICK     true
+
 extern char external_rules_command[MAXLEN];
 extern char status_prefix[MAXLEN];
 
@@ -118,6 +123,11 @@ extern bool merge_overlapping_monitors;
 
 extern bool tile_limit_enabled;
 extern int max_tiles_per_desktop;
+
+/* Windows-like snap behavior */
+extern bool edge_snap_enabled;
+extern int edge_snap_threshold;
+extern bool raise_floating_on_click;
 
 void run_config(int run_level);
 void load_settings(void);

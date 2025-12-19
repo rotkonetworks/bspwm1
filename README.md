@@ -1,89 +1,76 @@
-# bspwm1
+# bspwm
 
-hardened and optimized fork of baskerville/bspwm with security fixes and significant performance improvements.
+hardened fork of baskerville/bspwm. security fixes, memory safety improvements, reduced X11 latency.
 
 ## overview
 
-binary tree tiling window manager. communicates via socket with bspc client. requires sxhkd for keybindings.
+binary tree tiling window manager. socket IPC with bspc client. requires sxhkd for keybindings.
+
+## changes from upstream
+
+### security hardening
+
+- buffer overflow fixes with bounds checking
+- integer overflow protection on size calculations
+- safe memory allocation wrappers (NULL checks, overflow detection)
+- format string vulnerability fixes
+- input validation on all IPC commands
+- resource limits (tree depth, string sizes)
+
+### memory safety
+
+- scratch arena allocator for per-command temporary allocations
+- eliminates leak-prone manual free() on error paths
+- `__attribute__((cold))` on error handlers for better I-cache utilization
+- struct field reordering to eliminate padding holes
+
+### X11 pipelining
+
+reduced X11 round-trips in rule application (6→1) and client initialization (4→1). benefit depends on X11 latency:
+
+- **localhost**: ~10μs per round-trip, pipelining saves ~50μs (not measurable)
+- **remote X11**: ~500μs per round-trip, pipelining saves ~2-4ms per window
+
+### benchmark results (localhost, 100 iterations)
 
 ```
-sxhkd ────→ bspc ←────→ bspwm
+                      upstream    current
+command latency:         4 μs       4 μs
+window create+map:    1634 μs    1637 μs
 ```
 
-## security hardening
-
-- **memory safety**: buffer overflow fixes, bounds checking, integer overflow protection
-- **resource limits**: maximum tree depth, string size limits, recursion prevention
-- **input validation**: proper sanitization of all user inputs
-- **secure coding**: no format string vulnerabilities, proper null termination
-- **dos prevention**: protection against infinite loops and excessive allocations
-
-see [changelog](doc/CHANGELOG.md) versions 0.10.0-0.11.4 for complete details.
-
-## performance optimizations
-
-major algorithmic and caching improvements over baskerville/bspwm 0.9.10:
-
-- iterative tree traversal (eliminates recursion overhead)
-- 32-entry geometry cache with 100ms ttl (reduces x11 calls by 80-95%)
-- query buffer pools (removes malloc/free from hot paths)
-- o(1) command dispatch table (replaces linear string matching)
-- bulk leaf collection iterator (50-90% faster repeated queries)
-- compiler optimization hints and bounded string operations
-
-## benchmark results
-
-properly isolated performance comparison against upstream bspwm v0.9.12:
-
-| operation | upstream | current | change |
-|-----------|----------|---------|--------|
-| query_desktops | 892.08μs | 865.43μs | +3.0% |
-| query_monitors | 848.10μs | 834.17μs | +1.6% |
-| desktop_ops | 2606.63μs | 2660.16μs | -2.1% |
-| layout_ops | 2311.19μs | 2346.09μs | -1.5% |
-| config_ops | 832.54μs | 843.39μs | -1.3% |
-
-**isolated benchmarks** (separate xvfb instances, 50 samples each):
-- average performance: essentially equivalent (±3%)
-- all differences within measurement noise
-- no statistically significant changes detected
-
-**binary size trade-off**: +29kb bspwm binary, +4.2kb bspc client for security hardening.
+identical performance. security hardening adds no measurable overhead.
 
 ## benchmarking
 
-comprehensive performance testing against upstream bspwm 0.9.12:
+actual X11 latency comparison (requires Xvfb):
 
 ```bash
-# run automated benchmark suite
-./benches/run_benchmarks.sh
-
-# manual microbenchmarks
-cd benches && gcc -o microbench microbench.c -lm -lxcb && ./microbench
-
-# integration benchmarks (requires x11)
-cd benches && python3 bench.py all
+cd benches
+./compare_latency.sh [iterations]
 ```
 
-detailed results show equivalent performance vs upstream 0.9.12:
-- **core operations**: essentially identical performance (±3%)
-- **user experience**: feels noticeably snappier in daily use
-- **security**: significantly hardened with modern compiler protections
-- **binary size**: +29kb (+13%) due to security features and hardening
+measures real IPC round-trip and window creation latency. this is what matters.
 
-see [benches/README.md](benches/README.md) for complete benchmarking guide.
+CPU cycle microbenchmarks exist in `benches/microbench.c` but are UX-irrelevant. 4000 cycles = 1.3μs. one X11 round-trip = 500μs.
 
 ## build
 
 ```bash
 make
-sudo make install
+make install
 ```
 
-**dependencies**: libxcb, xcb-util, xcb-util-keysyms, xcb-util-wm
+dependencies: libxcb, xcb-util, xcb-util-keysyms, xcb-util-wm
+
+binary size: 285KB (+34KB / +13% vs upstream 0.9.12)
 
 ## configuration
 
-default config: `$XDG_CONFIG_HOME/bspwm/bspwmrc` (shell script calling bspc)
-keybindings: [sxhkd](https://github.com/baskerville/sxhkd)
-examples: [examples/](examples/)
+config: `$XDG_CONFIG_HOME/bspwm/bspwmrc`
+keybindings: sxhkd
+examples: `examples/`
+
+## license
+
+BSD-2-Clause

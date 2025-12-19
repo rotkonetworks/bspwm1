@@ -148,7 +148,7 @@ __attribute__((warn_unused_result)) char *tokenize_with_escape(struct tokenize_s
  * Reset after each command cycle to "free" all at once.
  * Prevents leaks in complex parsing paths.
  */
-#define SCRATCH_ARENA_SIZE (64 * 1024)  /* 64KB - enough for any command */
+#define SCRATCH_ARENA_SIZE (256 * 1024)  /* 256KB - increased for safety */
 
 typedef struct {
 	char *base;
