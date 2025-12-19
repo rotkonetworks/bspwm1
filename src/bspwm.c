@@ -22,6 +22,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -194,6 +195,9 @@ int main(int argc, char *argv[])
 			err("Couldn't bind a name to the socket.\n");
 		}
 
+		/* Restrict socket to owner only */
+		chmod(socket_path, 0600);
+
 		if (listen(sock_fd, SOMAXCONN) == -1) {
 			err("Couldn't listen to the socket.\n");
 		}
@@ -248,6 +252,16 @@ int main(int argc, char *argv[])
 
 			if (FD_ISSET(sock_fd, &descriptors)) {
 				cli_fd = accept(sock_fd, NULL, 0);
+				if (cli_fd > 0) {
+					/* Verify peer is same user - reject other users */
+					struct ucred cred;
+					socklen_t len = sizeof(cred);
+					if (getsockopt(cli_fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == -1 ||
+					    cred.uid != getuid()) {
+						close(cli_fd);
+						continue;
+					}
+				}
 				if (cli_fd > 0 && (n = recv(cli_fd, msg, sizeof(msg)-1, 0)) > 0) {
 					msg[n] = '\0';
 					FILE *rsp = fdopen(cli_fd, "w");
