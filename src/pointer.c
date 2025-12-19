@@ -62,32 +62,36 @@ void pointer_init(void)
 
 void window_grab_button(xcb_window_t win, uint8_t button, uint16_t modifier)
 {
-	if (!window_exists(win))
-		return;
-
-	uint16_t locks[3] = {num_lock, caps_lock, scroll_lock};
-	uint16_t lock_mods[3] = {XCB_MOD_MASK_2, XCB_MOD_MASK_LOCK, XCB_MOD_MASK_5};
-	
-	for (unsigned int i = 0; i < 8; i++) {
-		uint16_t mod = modifier;
-		for (int j = 0; j < 3; j++) {
-			if (locks[j] != XCB_NO_SYMBOL && (i & (1 << j)))
-				mod |= lock_mods[j];
-		}
-		xcb_grab_button(dpy, false, win, XCB_EVENT_MASK_BUTTON_PRESS,
-		                XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC,
-		                XCB_NONE, XCB_NONE, button, mod);
+#define GRAB(b, m) \
+	xcb_grab_button(dpy, false, win, XCB_EVENT_MASK_BUTTON_PRESS, \
+	                XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE, b, m)
+	GRAB(button, modifier);
+	if (num_lock != XCB_NO_SYMBOL && caps_lock != XCB_NO_SYMBOL && scroll_lock != XCB_NO_SYMBOL) {
+		GRAB(button, modifier | num_lock | caps_lock | scroll_lock);
 	}
+	if (num_lock != XCB_NO_SYMBOL && caps_lock != XCB_NO_SYMBOL) {
+		GRAB(button, modifier | num_lock | caps_lock);
+	}
+	if (caps_lock != XCB_NO_SYMBOL && scroll_lock != XCB_NO_SYMBOL) {
+		GRAB(button, modifier | caps_lock | scroll_lock);
+	}
+	if (num_lock != XCB_NO_SYMBOL && scroll_lock != XCB_NO_SYMBOL) {
+		GRAB(button, modifier | num_lock | scroll_lock);
+	}
+	if (num_lock != XCB_NO_SYMBOL) {
+		GRAB(button, modifier | num_lock);
+	}
+	if (caps_lock != XCB_NO_SYMBOL) {
+		GRAB(button, modifier | caps_lock);
+	}
+	if (scroll_lock != XCB_NO_SYMBOL) {
+		GRAB(button, modifier | scroll_lock);
+	}
+#undef GRAB
 }
 
 void window_grab_buttons(xcb_window_t win)
 {
-	if (!window_exists(win))
-		return;
-
-	if (LENGTH(BUTTONS) > LENGTH(pointer_actions))
-		return;
-
 	for (unsigned int i = 0; i < LENGTH(BUTTONS); i++) {
 		if (click_to_focus == (int8_t)XCB_BUTTON_INDEX_ANY || click_to_focus == (int8_t)BUTTONS[i])
 			window_grab_button(win, BUTTONS[i], XCB_NONE);

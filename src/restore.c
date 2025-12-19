@@ -37,8 +37,8 @@
 #include "tree.h"
 #include "settings.h"
 #include "subscribe.h"
-#include "restore.h"
 #include "window.h"
+#include "restore.h"
 #include "parse.h"
 
 bool restore_state(const char *file_path)
@@ -214,6 +214,9 @@ bool restore_state(const char *file_path)
 	ewmh_update_client_list(false);
 	ewmh_update_client_list(true);
 	ewmh_update_active_window();
+
+	/* Restore X11 input focus to the focused window */
+	update_input_focus();
 
 	free(tokens);
 	free(json);
