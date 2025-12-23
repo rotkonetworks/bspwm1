@@ -16,6 +16,7 @@ ZSHCPL    ?= $(PREFIX)/share/zsh/site-functions
 
 MD_DOCS    = README.md doc/CHANGELOG.md doc/CONTRIBUTING.md doc/INSTALL.md doc/MISC.md doc/TODO.md
 XSESSIONS ?= $(PREFIX)/share/xsessions
+CONFPREFIX ?= $(DESTDIR)$(HOME)/.config
 
 WM_SRC   = bspwm.c helpers.c geometry.c jsmn.c settings.c monitor.c desktop.c tree.c stack.c history.c \
 	 events.c pointer.c window.c messages.c parse.c query.c restore.c rule.c ewmh.c subscribe.c
@@ -58,6 +59,13 @@ install:
 	mkdir -p "$(DESTDIR)$(XSESSIONS)"
 	cp -p contrib/freedesktop/bspwm.desktop "$(DESTDIR)$(XSESSIONS)"
 
+install_cfg:
+	mkdir -p "$(CONFPREFIX)"/bspwm
+	mkdir -p "$(CONFPREFIX)"/sxhkd
+	cp -p examples/bspwmrc "$(CONFPREFIX)"/bspwm/bspwmrc
+	cp -p examples/sxhkdrc "$(CONFPREFIX)"/sxhkd/sxhkdrc
+	chmod +x "$(CONFPREFIX)"/bspwm/bspwmrc
+
 uninstall:
 	rm -f "$(DESTDIR)$(BINPREFIX)"/bspwm
 	rm -f "$(DESTDIR)$(BINPREFIX)"/bspc
@@ -75,4 +83,4 @@ doc:
 clean:
 	rm -f $(WM_OBJ) $(CLI_OBJ) bspwm bspc
 
-.PHONY: all debug install uninstall doc clean
+.PHONY: all debug install install_cfg uninstall doc clean

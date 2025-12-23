@@ -21,23 +21,17 @@ sxhkd &
 
 sleep 0.3
 
-# adopt orphaned windows from temp desktops before reassigning
-for node in $(bspc query -N -n .window -d Desktop 2>/dev/null); do
-    bspc node "$node" -d I
-done
+# desktop setup (skip on restart - $1 is non-zero when state was restored)
+# this prevents destroying windows that were just restored by bspc wm -r
+if [ "${1:-0}" -eq 0 ]; then
+    # single monitor setup
+    bspc monitor -d I II III IV V VI VII VIII IX X
 
-# single monitor setup
-bspc monitor -d I II III IV V VI VII VIII IX X
-
-# dual monitor example:
-# bspc monitor DP-0 -d I II III IV V VI VII VIII
-# bspc monitor DP-1 -d IX X
-# bspc wm -O DP-0 DP-1
-
-# clean up orphan desktops
-for desktop in $(bspc query -D -d '.!occupied' --names 2>/dev/null | grep -E '^Desktop'); do
-    bspc desktop "$desktop" -r 2>/dev/null
-done
+    # dual monitor example:
+    # bspc monitor DP-0 -d I II III IV V VI VII VIII
+    # bspc monitor DP-1 -d IX X
+    # bspc wm -O DP-0 DP-1
+fi
 
 # ──────────────────────────────────────────
 # window management
