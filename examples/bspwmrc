@@ -1,18 +1,144 @@
-#! /bin/sh
+#!/bin/sh
 
-pgrep -x sxhkd > /dev/null || sxhkd &
+# ══════════════════════════════════════════════════════════════════════════════
+# bspwmrc - example configuration for bspwm
+# ══════════════════════════════════════════════════════════════════════════════
 
+# ensure no memory allocator preload (breaks some browsers)
+unset LD_PRELOAD
+
+# start sxhkd (kill existing, start fresh)
+pkill -x sxhkd 2>/dev/null
+sleep 0.1
+sxhkd &
+
+# ──────────────────────────────────────────
+# monitor setup
+# ──────────────────────────────────────────
+# uncomment and adjust for your setup:
+# xrandr --output DP-0 --primary --mode 2560x1440 --rate 144 --pos 0x0 \
+#        --output DP-1 --mode 1920x1080 --rotate left --pos 2560x0
+
+sleep 0.3
+
+# adopt orphaned windows from temp desktops before reassigning
+for node in $(bspc query -N -n .window -d Desktop 2>/dev/null); do
+    bspc node "$node" -d I
+done
+
+# single monitor setup
 bspc monitor -d I II III IV V VI VII VIII IX X
 
-bspc config border_width         2
-bspc config window_gap          12
+# dual monitor example:
+# bspc monitor DP-0 -d I II III IV V VI VII VIII
+# bspc monitor DP-1 -d IX X
+# bspc wm -O DP-0 DP-1
 
+# clean up orphan desktops
+for desktop in $(bspc query -D -d '.!occupied' --names 2>/dev/null | grep -E '^Desktop'); do
+    bspc desktop "$desktop" -r 2>/dev/null
+done
+
+# ──────────────────────────────────────────
+# window management
+# ──────────────────────────────────────────
+bspc config border_width         2
+bspc config window_gap           8
 bspc config split_ratio          0.52
 bspc config borderless_monocle   true
 bspc config gapless_monocle      true
+bspc config focus_follows_pointer true
+bspc config pointer_follows_focus true
+bspc config automatic_scheme     alternate
+bspc config initial_polarity     second_child
+bspc config remove_disabled_monitors true
+bspc config remove_unplugged_monitors true
 
-bspc rule -a Gimp desktop='^8' state=floating follow=on
-bspc rule -a Chromium desktop='^2'
-bspc rule -a mplayer2 state=floating
-bspc rule -a Kupfer.py focus=on
+# colors
+bspc config focused_border_color  "#5e81ac"
+bspc config normal_border_color   "#2e3440"
+bspc config active_border_color   "#81a1c1"
+bspc config presel_feedback_color "#88c0d0"
+
+# split limits - prevent excessive window splits on specific desktops
+# for i in {1..5}; do
+#     bspc config -d "^$i" split_limits_enabled true
+#     bspc config -d "^$i" left_split_limit 2
+#     bspc config -d "^$i" right_split_limit 4
+# done
+
+# ──────────────────────────────────────────
+# window rules
+# ──────────────────────────────────────────
+
+# terminals
+# bspc rule -a Alacritty desktop='^1' follow=on
+# bspc rule -a kitty desktop='^1' follow=on
+
+# browsers (desktop 2)
+bspc rule -a firefox desktop='^2' follow=on
+bspc rule -a Chromium desktop='^2' follow=on
+
+# chat apps (desktop 3)
+# bspc rule -a discord desktop='^3' follow=off
+# bspc rule -a TelegramDesktop desktop='^3' follow=off
+# bspc rule -a Signal desktop='^3' follow=off
+# bspc rule -a Element desktop='^3' follow=off
+
+# media (desktop 5)
+bspc rule -a mpv state=fullscreen
+# bspc rule -a Spotify desktop='^5'
+
+# file managers
+# bspc rule -a Pcmanfm desktop='^6' follow=on
+# bspc rule -a Thunar desktop='^6' follow=on
+
+# virtual machines (desktop 7)
+# bspc rule -a VirtualBox desktop='^7'
+# bspc rule -a Virt-manager desktop='^7'
+
+# system tools
+bspc rule -a Pavucontrol state=floating center=on
+bspc rule -a Blueman-manager state=floating center=on
+
+# password manager - sticky to be omnipresent
+# bspc rule -a KeePassXC state=floating center=on sticky=on rectangle=900x700+0+0
+
+# ──────────────────────────────────────────
+# floating rules
+# ──────────────────────────────────────────
+bspc rule -a Peek state=floating
 bspc rule -a Screenkey manage=off
+bspc rule -a flameshot state=floating
+bspc rule -a Pinentry state=floating center=on
+bspc rule -a "Picture-in-Picture" state=floating sticky=on
+bspc rule -a "*:*:Picture in picture" state=floating sticky=on
+bspc rule -a "*:*:Save File" state=floating center=on
+bspc rule -a "*:*:Open File" state=floating center=on
+bspc rule -a "*:*:Preferences" state=floating center=on
+bspc rule -a "*:*:Settings" state=floating center=on
+
+# browser extension popups
+# bspc rule -a "*:*:Extension:*" state=floating center=on
+# bspc rule -a "*:*:MetaMask Notification" state=floating center=on
+
+# ──────────────────────────────────────────
+# x settings
+# ──────────────────────────────────────────
+xset r rate 200 50
+xsetroot -cursor_name left_ptr
+# setxkbmap -option caps:escape
+
+# ──────────────────────────────────────────
+# autostart (only on first launch)
+# ──────────────────────────────────────────
+BSPWM_STATE="/tmp/bspwm-started-$DISPLAY"
+if [ ! -f "$BSPWM_STATE" ]; then
+    touch "$BSPWM_STATE"
+    # dunst &
+    # picom &
+    # polybar &
+fi
+
+# restore focus after config reload
+bspc node -f focused.local 2>/dev/null
