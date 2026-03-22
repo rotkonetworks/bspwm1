@@ -132,6 +132,10 @@ if [ ! -f "$BSPWM_STATE" ]; then
     # dunst &
     # picom &
     # polybar &
+
+    # urgent window notifications (e.g. dota2 game start)
+    pkill -f urgent-notify 2>/dev/null
+    ~/.config/bspwm/urgent-notify &
 fi
 
 # restore focus after config reload
