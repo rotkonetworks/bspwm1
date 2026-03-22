@@ -45,6 +45,3 @@ void ewmh_wm_state_update(node_t *n);
 void ewmh_set_supporting(xcb_window_t win);
 
 #endif
-void ewmh_update_desktop_names(void);
-void ewmh_update_desktop_names(void);
-void ewmh_update_desktop_names(void);
