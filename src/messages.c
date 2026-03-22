@@ -602,6 +602,16 @@ void cmd_node(char **args, int num, FILE *rsp)
 		} else if (streq("-i", *args) || streq("--insert-receptacle", *args)) {
 			insert_receptacle(trg.monitor, trg.desktop, trg.node);
 			changed = true;
+		} else if (streq("--center", *args)) {
+			if (trg.node == NULL || trg.node->client == NULL) {
+				fail(rsp, "%s", "");
+				break;
+			}
+			if (IS_FLOATING(trg.node->client)) {
+				window_center(trg.monitor, trg.node->client);
+				xcb_rectangle_t *r = &trg.node->client->floating_rectangle;
+				window_move_resize(trg.node->id, r->x, r->y, r->width, r->height);
+			}
 		} else if (streq("-c", *args) || streq("--close", *args)) {
 			if (num > 1) {
 				fail(rsp, "node %s: Trailing commands.\n", *args);
@@ -1208,11 +1218,9 @@ void cmd_rule(char **args, int num, FILE *rsp)
 			rule->class_name[sizeof(rule->class_name) - 1] = '\0';
 			snprintf(rule->instance_name, sizeof(rule->instance_name), "%s",
 					 instance_name[0] == '\0' ? MATCH_ANY : instance_name);
-			rule->instance_name[sizeof(rule->instance_name) - 1] = '0';
 			rule->instance_name[sizeof(rule->instance_name) - 1] = '\0';
 			snprintf(rule->name, sizeof(rule->name), "%s",
 					 name[0] == '\0' ? MATCH_ANY : name);
-			rule->name[sizeof(rule->name) - 1] = '0';
 			rule->name[sizeof(rule->name) - 1] = '\0';
 			free(class_name);
 			free(instance_name);
@@ -1894,6 +1902,13 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 			return;
 		}
 		raise_floating_on_click = b;
+	} else if (streq("cascade_offset", name)) {
+		int o;
+		if (sscanf(value, "%i", &o) != 1 || o < 0 || o > 100) {
+			fail(rsp, "config: %s: Invalid value: '%s' (must be 0-100).\n", name, value);
+			return;
+		}
+		cascade_offset = o;
 #define SET_MON_BOOL(s) \
 	} else if (streq(#s, name)) { \
 		if (!parse_bool(value, &s)) { \
@@ -2047,6 +2062,8 @@ void get_setting(coordinates_t loc, char *name, FILE* rsp)
 		fprintf(rsp, "%i", edge_snap_threshold);
 	} else if (streq("raise_floating_on_click", name)) {
 		fprintf(rsp, "%s", BOOL_STR(raise_floating_on_click));
+	} else if (streq("cascade_offset", name)) {
+		fprintf(rsp, "%i", cascade_offset);
 	} else {
 		fail(rsp, "config: Unknown setting: '%s'.\n", name);
 		return;
