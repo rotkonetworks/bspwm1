@@ -75,6 +75,7 @@
 #define EDGE_SNAP_ENABLED           true
 #define EDGE_SNAP_THRESHOLD         20
 #define RAISE_FLOATING_ON_CLICK     true
+#define CASCADE_OFFSET              20
 
 extern char external_rules_command[MAXLEN];
 extern char status_prefix[MAXLEN];
@@ -128,6 +129,7 @@ extern int max_tiles_per_desktop;
 extern bool edge_snap_enabled;
 extern int edge_snap_threshold;
 extern bool raise_floating_on_click;
+extern int cascade_offset;
 
 void run_config(int run_level);
 void load_settings(void);
