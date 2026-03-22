@@ -162,7 +162,7 @@ void put_status(subscriber_mask_t mask, ...)
 				va_list args;
 				va_start(args, mask);
 				fmt = va_arg(args, char *);
-				fprintf(sb->stream, "%s", fmt);
+				vfprintf(sb->stream, fmt, args);
 				va_end(args);
 				ret = fflush(sb->stream);
 			}
