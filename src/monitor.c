@@ -176,20 +176,15 @@ void embrace_client(monitor_t *m, client_t *c)
 	if (!m || !c)
 		return;
 
-	if (c->floating_rectangle.x < m->rectangle.x) {
+	if ((c->floating_rectangle.x + c->floating_rectangle.width) <= m->rectangle.x) {
 		c->floating_rectangle.x = m->rectangle.x;
-	} else if (c->floating_rectangle.width <= m->rectangle.width) {
-		int16_t max_x = m->rectangle.x + m->rectangle.width - c->floating_rectangle.width;
-		if (c->floating_rectangle.x > max_x)
-			c->floating_rectangle.x = max_x;
+	} else if (c->floating_rectangle.x >= (m->rectangle.x + m->rectangle.width)) {
+		c->floating_rectangle.x = (m->rectangle.x + m->rectangle.width) - c->floating_rectangle.width;
 	}
-
-	if (c->floating_rectangle.y < m->rectangle.y) {
+	if ((c->floating_rectangle.y + c->floating_rectangle.height) <= m->rectangle.y) {
 		c->floating_rectangle.y = m->rectangle.y;
-	} else if (c->floating_rectangle.height <= m->rectangle.height) {
-		int16_t max_y = m->rectangle.y + m->rectangle.height - c->floating_rectangle.height;
-		if (c->floating_rectangle.y > max_y)
-			c->floating_rectangle.y = max_y;
+	} else if (c->floating_rectangle.y >= (m->rectangle.y + m->rectangle.height)) {
+		c->floating_rectangle.y = (m->rectangle.y + m->rectangle.height) - c->floating_rectangle.height;
 	}
 }
 
