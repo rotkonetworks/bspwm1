@@ -159,6 +159,8 @@ bool manage_window(xcb_window_t win, rule_consequence_t *csq, int fd)
 	}
 
 	monitor_t *mm = monitor_from_client(c);
+	if (mm == NULL)
+		mm = m;
 	embrace_client(mm, c);
 	adapt_geometry(&mm->rectangle, &m->rectangle, n);
 
