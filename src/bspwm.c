@@ -305,7 +305,15 @@ int main(int argc, char *argv[])
 			running = false;
 		}
 
-		prune_dead_subscribers();
+		/* Prune dead subscribers lazily - the write() probe is a
+		 * syscall per subscriber, too expensive for every wake.
+		 * Most dead subscribers are already caught by put_status()
+		 * fflush failures; this catches fully idle ones. */
+		static unsigned int prune_counter;
+		if (++prune_counter >= 64) {
+			prune_counter = 0;
+			prune_dead_subscribers();
+		}
 	}
 
 	if (restart) {
