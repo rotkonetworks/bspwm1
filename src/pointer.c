@@ -261,6 +261,15 @@ bool grab_pointer(pointer_action_t pac)
 	}
 	free(reply);
 
+	/* Raise floating window in X stack for drag/resize without
+	 * altering bspwm's internal stacking order, so fullscreen
+	 * and monocle windows can still cover it afterwards. */
+	if (IS_FLOATING(loc.node->client)) {
+		uint32_t values[] = {XCB_STACK_MODE_ABOVE};
+		xcb_configure_window(dpy, loc.node->id,
+		                     XCB_CONFIG_WINDOW_STACK_MODE, values);
+	}
+
 	if (pac == ACTION_MOVE) {
 		put_status(SBSC_MASK_POINTER_ACTION, "pointer_action 0x%08X 0x%08X 0x%08X move begin\n",
 		          loc.monitor->id, loc.desktop->id, loc.node->id);
@@ -366,6 +375,12 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, xcb_point_t pos)
 		return;
 	}
 
+	/* Re-locate node to get fresh coordinates - the monitor/desktop
+	 * pointers in loc may be stale if events were processed during drag */
+	if (!locate_window(n->id, &loc)) {
+		return;
+	}
+
 	if (pac == ACTION_MOVE) {
 		put_status(SBSC_MASK_POINTER_ACTION, "pointer_action 0x%08X 0x%08X 0x%08X move end\n",
 		          loc.monitor->id, loc.desktop->id, n->id);
@@ -453,11 +468,13 @@ void apply_snap_zone(coordinates_t *loc, monitor_t *target_monitor, snap_zone_t 
 
 	xcb_rectangle_t rect = m->rectangle;
 
-	/* Account for padding */
+	/* Account for padding with underflow protection */
+	int pad_h = m->padding.left + m->padding.right;
+	int pad_v = m->padding.top + m->padding.bottom;
 	rect.x += m->padding.left;
 	rect.y += m->padding.top;
-	rect.width -= m->padding.left + m->padding.right;
-	rect.height -= m->padding.top + m->padding.bottom;
+	rect.width = (pad_h < rect.width) ? rect.width - pad_h : 1;
+	rect.height = (pad_v < rect.height) ? rect.height - pad_v : 1;
 
 	xcb_rectangle_t target = {0, 0, 0, 0};
 
@@ -535,10 +552,12 @@ void show_snap_preview(monitor_t *m, snap_zone_t zone)
 	snap_target_monitor = m;
 
 	xcb_rectangle_t rect = m->rectangle;
+	int pad_h = m->padding.left + m->padding.right;
+	int pad_v = m->padding.top + m->padding.bottom;
 	rect.x += m->padding.left;
 	rect.y += m->padding.top;
-	rect.width -= m->padding.left + m->padding.right;
-	rect.height -= m->padding.top + m->padding.bottom;
+	rect.width = (pad_h < rect.width) ? rect.width - pad_h : 1;
+	rect.height = (pad_v < rect.height) ? rect.height - pad_v : 1;
 
 	xcb_rectangle_t preview = {0, 0, 0, 0};
 
