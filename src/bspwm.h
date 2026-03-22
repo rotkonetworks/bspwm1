@@ -80,6 +80,7 @@ extern xcb_atom_t WM_STATE;
 extern xcb_atom_t WM_TAKE_FOCUS;
 extern xcb_atom_t WM_DELETE_WINDOW;
 extern int exit_status;
+extern int epoll_fd;
 
 extern bool auto_raise;
 extern bool sticky_still;

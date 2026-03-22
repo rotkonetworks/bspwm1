@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <sys/types.h>
+#include <sys/epoll.h>
 #include <string.h>
 #include <unistd.h>
 #include "bspwm.h"
@@ -179,6 +180,8 @@ void add_pending_rule(pending_rule_t *pr)
 		pr->prev = pending_rule_tail;
 		pending_rule_tail = pr;
 	}
+	struct epoll_event ev = { .events = EPOLLIN, .data.fd = pr->fd };
+	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, pr->fd, &ev);
 }
 
 void remove_pending_rule(pending_rule_t *pr)
@@ -200,6 +203,7 @@ void remove_pending_rule(pending_rule_t *pr)
 	if (pr == pending_rule_tail) {
 		pending_rule_tail = a;
 	}
+	epoll_ctl(epoll_fd, EPOLL_CTL_DEL, pr->fd, NULL);
 	close(pr->fd);
 	free(pr->csq);
 	event_queue_t *eq = pr->event_head;

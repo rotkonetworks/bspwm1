@@ -27,10 +27,11 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/time.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/epoll.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
@@ -83,6 +84,7 @@ xcb_atom_t WM_STATE;
 xcb_atom_t WM_TAKE_FOCUS;
 xcb_atom_t WM_DELETE_WINDOW;
 int exit_status;
+int epoll_fd;
 
 bool auto_raise;
 bool sticky_still;
@@ -94,12 +96,11 @@ bool randr;
 
 int main(int argc, char *argv[])
 {
-	fd_set descriptors;
 	char socket_path[MAXLEN];
 	char state_path[MAXLEN] = {0};
 	int run_level = 0;
 	config_path[0] = '\0';
-	int sock_fd = -1, cli_fd, dpy_fd, max_fd, n;
+	int sock_fd = -1, cli_fd, dpy_fd, n;
 	struct sockaddr_un sock_address;
 	char msg[BUFSIZ] = {0};
 	xcb_generic_event_t *event;
@@ -154,6 +155,7 @@ int main(int argc, char *argv[])
 	if (state_path[0] != '\0') {
 		restore_state(state_path);
 		unlink(state_path);
+		adopt_orphans();
 	}
 
 	dpy_fd = xcb_get_file_descriptor(dpy);
@@ -205,6 +207,18 @@ int main(int argc, char *argv[])
 
 	fcntl(sock_fd, F_SETFD, FD_CLOEXEC | fcntl(sock_fd, F_GETFD));
 
+	epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+	if (epoll_fd == -1) {
+		err("Couldn't create epoll instance.\n");
+	}
+
+	struct epoll_event ep_ev;
+	ep_ev.events = EPOLLIN;
+	ep_ev.data.fd = sock_fd;
+	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock_fd, &ep_ev);
+	ep_ev.data.fd = dpy_fd;
+	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, dpy_fd, &ep_ev);
+
 	struct sigaction sigact;
 	sigact.sa_handler = sig_handler;
 	sigemptyset(&sigact.sa_mask);
@@ -218,39 +232,44 @@ int main(int argc, char *argv[])
 	run_config(run_level);
 	running = true;
 
+	#define MAX_EPOLL_EVENTS 16
+	struct epoll_event ep_events[MAX_EPOLL_EVENTS];
+
 	while (running) {
 
 		xcb_flush(dpy);
 
-		FD_ZERO(&descriptors);
-		FD_SET(sock_fd, &descriptors);
-		FD_SET(dpy_fd, &descriptors);
-		max_fd = MAX(sock_fd, dpy_fd);
-
-		for (pending_rule_t *pr = pending_rule_head; pr != NULL; pr = pr->next) {
-			FD_SET(pr->fd, &descriptors);
-			if (pr->fd > max_fd) {
-				max_fd = pr->fd;
-			}
+		int nfds = epoll_wait(epoll_fd, ep_events, MAX_EPOLL_EVENTS, -1);
+		if (nfds == -1) {
+			if (errno == EINTR)
+				continue;
+			break;
 		}
 
-		if (select(max_fd + 1, &descriptors, NULL, NULL, NULL) > 0) {
+		for (int i = 0; i < nfds; i++) {
+			int fd = ep_events[i].data.fd;
 
+			/* Check pending rules */
+			bool handled = false;
 			pending_rule_t *pr = pending_rule_head;
 			while (pr != NULL) {
 				pending_rule_t *next = pr->next;
-				if (FD_ISSET(pr->fd, &descriptors)) {
+				if (pr->fd == fd) {
 					if (manage_window(pr->win, pr->csq, pr->fd)) {
 						for (event_queue_t *eq = pr->event_head; eq != NULL; eq = eq->next) {
 							handle_event(&eq->event);
 						}
 					}
 					remove_pending_rule(pr);
+					handled = true;
+					break;
 				}
 				pr = next;
 			}
+			if (handled)
+				continue;
 
-			if (FD_ISSET(sock_fd, &descriptors)) {
+			if (fd == sock_fd) {
 				cli_fd = accept(sock_fd, NULL, 0);
 				if (cli_fd > 0) {
 					/* Verify peer is same user - reject other users */
@@ -267,23 +286,19 @@ int main(int argc, char *argv[])
 					FILE *rsp = fdopen(cli_fd, "w");
 					if (rsp != NULL) {
 						handle_message(msg, n, rsp);
-						scratch_reset();  /* Free all temp allocations */
+						scratch_reset();
 					} else {
 						warn("Can't open the client socket as file.\n");
 						close(cli_fd);
 					}
 				}
-			}
-
-			if (FD_ISSET(dpy_fd, &descriptors)) {
+			} else if (fd == dpy_fd) {
 				xcb_aux_sync(dpy);
-				/* Process all pending events */
 				while ((event = xcb_poll_for_event(dpy)) != NULL) {
 					handle_event(event);
 					free(event);
 				}
 			}
-
 		}
 
 		if (!check_connection(dpy)) {
@@ -349,6 +364,7 @@ int main(int argc, char *argv[])
 		exit_status = 1;
 	}
 
+	close(epoll_fd);
 	close(sock_fd);
 	unlink(socket_path);
 
