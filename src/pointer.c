@@ -261,15 +261,6 @@ bool grab_pointer(pointer_action_t pac)
 	}
 	free(reply);
 
-	/* Raise floating window in X stack for drag/resize without
-	 * altering bspwm's internal stacking order, so fullscreen
-	 * and monocle windows can still cover it afterwards. */
-	if (IS_FLOATING(loc.node->client)) {
-		uint32_t values[] = {XCB_STACK_MODE_ABOVE};
-		xcb_configure_window(dpy, loc.node->id,
-		                     XCB_CONFIG_WINDOW_STACK_MODE, values);
-	}
-
 	if (pac == ACTION_MOVE) {
 		put_status(SBSC_MASK_POINTER_ACTION, "pointer_action 0x%08X 0x%08X 0x%08X move begin\n",
 		          loc.monitor->id, loc.desktop->id, loc.node->id);
