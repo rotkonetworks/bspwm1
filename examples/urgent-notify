@@ -1,0 +1,6 @@
+#!/bin/sh
+# notify when windows set urgent flag (e.g. dota2 game start)
+
+bspc subscribe node_flag | while read -r _ _ _ _ flag state; do
+	[ "$flag" = "urgent" ] && [ "$state" = "on" ] && dunstify -u critical -t 5000 "game ready"
+done

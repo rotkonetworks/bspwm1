@@ -4,6 +4,16 @@ bspwm
 bspc
 *.o
 tests/test_window
+tests/test_window_wl
+tests/test_stacking_borders
+tests/test_stress
+
+# Arch packaging build artifacts (makepkg output)
+pkg/arch/bspwm1/
+pkg/arch/pkg/
+pkg/arch/src/
+pkg/arch/*.pkg.tar.zst
+pkg/arch/*.pkg.tar.xz
 
 # Benchmark artifacts and temporary files
 # Upstream comparison binaries
