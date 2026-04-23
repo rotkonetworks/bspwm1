@@ -32,8 +32,6 @@
  * Build with: make BACKEND=wlroots
  */
 
-#define WLR_USE_UNSTABLE
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -79,6 +77,7 @@
 #include "tree.h"
 #include "query.h"
 #include "keybind.h"
+#include "settings.h"
 
 /* ------------------------------------------------------------------ */
 /*  Compositor state                                                  */
@@ -280,7 +279,6 @@ static void toplevel_update_borders(struct bspwm_wlr_toplevel *tl)
 	if (w <= 0 || h <= 0) return;
 
 	int total_w = w + 2 * (int)bw;
-	int total_h = h + 2 * (int)bw;
 
 	/* Offset the surface by border width */
 	wlr_scene_node_set_position(&tl->surface_tree->node, bw, bw);
@@ -352,22 +350,13 @@ static struct bspwm_wlr_toplevel *toplevel_from_id(bspwm_wid_t id)
 	return NULL;
 }
 
-static struct bspwm_wlr_output *output_from_id(bspwm_output_id_t id)
-{
-	struct bspwm_wlr_output *out;
-	wl_list_for_each(out, &server.outputs, link) {
-		if (out->id == id)
-			return out;
-	}
-	return NULL;
-}
-
 /* ------------------------------------------------------------------ */
 /*  Output (monitor) handling                                         */
 /* ------------------------------------------------------------------ */
 
 static void output_frame(struct wl_listener *listener, void *data)
 {
+	(void)data;
 	struct bspwm_wlr_output *output = wl_container_of(listener, output, frame);
 	struct wlr_scene_output *scene_output =
 		wlr_scene_get_scene_output(server.scene, output->wlr_output);
@@ -706,6 +695,8 @@ static void server_new_keyboard(struct wlr_input_device *device)
 /*  Pointer / cursor handling                                         */
 /* ------------------------------------------------------------------ */
 
+static struct bspwm_wlr_toplevel *toplevel_at_cursor(double *sx, double *sy);
+
 static void process_cursor_motion(uint32_t time)
 {
 	/* Handle interactive move/resize */
@@ -766,6 +757,24 @@ static void process_cursor_motion(uint32_t time)
 
 	wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
 	wlr_seat_pointer_notify_motion(seat, time, sx, sy);
+
+	/* Focus-follows-pointer: refocus only when the toplevel under the
+	 * cursor changes, so we don't thrash focus on every motion event. */
+	if (focus_follows_pointer) {
+		double tsx, tsy;
+		struct bspwm_wlr_toplevel *tl = toplevel_at_cursor(&tsx, &tsy);
+		static bspwm_wid_t last_hover_id;
+		if (tl && tl->id != last_hover_id) {
+			last_hover_id = tl->id;
+			coordinates_t loc;
+			if (locate_window(tl->id, &loc) && loc.monitor && loc.desktop &&
+			    loc.node != loc.desktop->focus) {
+				focus_node(loc.monitor, loc.desktop, loc.node);
+			}
+		} else if (!tl) {
+			last_hover_id = BSPWM_WID_NONE;
+		}
+	}
 }
 
 static void cursor_motion(struct wl_listener *listener, void *data)
@@ -1566,6 +1575,11 @@ void backend_window_move(bspwm_wid_t win, int16_t x, int16_t y)
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (tl && tl->scene_tree) {
 		wlr_scene_node_set_position(&tl->scene_tree->node, x, y);
+		return;
+	}
+	struct bspwm_wlr_presel *p = presel_from_id(win);
+	if (p && p->rect) {
+		wlr_scene_node_set_position(&p->rect->node, x, y);
 	}
 }
 
@@ -1574,17 +1588,29 @@ void backend_window_resize(bspwm_wid_t win, uint16_t w, uint16_t h)
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (tl) {
 		wlr_xdg_toplevel_set_size(tl->xdg_toplevel, w, h);
+		return;
+	}
+	struct bspwm_wlr_presel *p = presel_from_id(win);
+	if (p && p->rect) {
+		wlr_scene_rect_set_size(p->rect, w, h);
 	}
 }
 
 void backend_window_move_resize(bspwm_wid_t win, int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
-	if (!tl) return;
-	if (tl->scene_tree) {
-		wlr_scene_node_set_position(&tl->scene_tree->node, x, y);
+	if (tl) {
+		if (tl->scene_tree) {
+			wlr_scene_node_set_position(&tl->scene_tree->node, x, y);
+		}
+		wlr_xdg_toplevel_set_size(tl->xdg_toplevel, w, h);
+		return;
 	}
-	wlr_xdg_toplevel_set_size(tl->xdg_toplevel, w, h);
+	struct bspwm_wlr_presel *p = presel_from_id(win);
+	if (p && p->rect) {
+		wlr_scene_node_set_position(&p->rect->node, x, y);
+		wlr_scene_rect_set_size(p->rect, w, h);
+	}
 }
 
 void backend_window_set_border_width(bspwm_wid_t win, uint32_t bw)
@@ -1651,6 +1677,11 @@ void backend_window_raise(bspwm_wid_t win)
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (tl && tl->scene_tree) {
 		wlr_scene_node_raise_to_top(&tl->scene_tree->node);
+		return;
+	}
+	struct bspwm_wlr_presel *p = presel_from_id(win);
+	if (p && p->rect) {
+		wlr_scene_node_raise_to_top(&p->rect->node);
 	}
 }
 
@@ -1659,6 +1690,11 @@ void backend_window_lower(bspwm_wid_t win)
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (tl && tl->scene_tree) {
 		wlr_scene_node_lower_to_bottom(&tl->scene_tree->node);
+		return;
+	}
+	struct bspwm_wlr_presel *p = presel_from_id(win);
+	if (p && p->rect) {
+		wlr_scene_node_lower_to_bottom(&p->rect->node);
 	}
 }
 
