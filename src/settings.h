@@ -27,7 +27,7 @@
 
 #include "types.h"
 
-#define POINTER_MODIFIER         XCB_MOD_MASK_4
+#define POINTER_MODIFIER         BSP_MOD_MASK_4
 #define POINTER_MOTION_INTERVAL  17
 #define EXTERNAL_RULES_COMMAND   ""
 #define STATUS_PREFIX            "W"
@@ -54,7 +54,7 @@
 #define FOCUS_FOLLOWS_POINTER       false
 #define POINTER_FOLLOWS_FOCUS       false
 #define POINTER_FOLLOWS_MONITOR     false
-#define CLICK_TO_FOCUS              XCB_BUTTON_INDEX_1
+#define CLICK_TO_FOCUS              BSP_BUTTON_1
 #define SWALLOW_FIRST_CLICK         false
 #define IGNORE_EWMH_FOCUS           false
 #define IGNORE_EWMH_FULLSCREEN      0

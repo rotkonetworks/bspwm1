@@ -238,7 +238,7 @@ desktop_t *make_desktop(const char *name, uint32_t id)
 		d->name[sizeof(d->name) - 1] = '\0';
 	}
 	
-	d->id = (id == XCB_NONE) ? xcb_generate_id(dpy) : id;
+	d->id = (id == BSPWM_WID_NONE) ? ++clients_count : id;
 	d->prev = d->next = NULL;
 	d->root = d->focus = NULL;
 	d->user_layout = LAYOUT_TILED;
@@ -380,7 +380,7 @@ bool swap_desktops(monitor_t *m1, desktop_t *d1, monitor_t *m2, desktop_t *d2, b
 	desktop_t *d2_stickies = NULL;
 
 	if (m1->sticky_count > 0 && d1_was_active && sticky_count(d1->root) > 0) {
-		d1_stickies = make_desktop(NULL, XCB_NONE);
+		d1_stickies = make_desktop(NULL, BSPWM_WID_NONE);
 		if (d1_stickies) {
 			insert_desktop(m1, d1_stickies);
 			transfer_sticky_nodes(m1, d1, m1, d1_stickies, d1->root);
@@ -388,7 +388,7 @@ bool swap_desktops(monitor_t *m1, desktop_t *d1, monitor_t *m2, desktop_t *d2, b
 	}
 
 	if (m2->sticky_count > 0 && d2_was_active && sticky_count(d2->root) > 0) {
-		d2_stickies = make_desktop(NULL, XCB_NONE);
+		d2_stickies = make_desktop(NULL, BSPWM_WID_NONE);
 		if (d2_stickies) {
 			insert_desktop(m2, d2_stickies);
 			transfer_sticky_nodes(m2, d2, m2, d2_stickies, d2->root);

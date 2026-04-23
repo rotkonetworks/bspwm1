@@ -24,6 +24,7 @@
 #include <xcb/xcb_keysyms.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include "backend_x11.h"
 #include "bspwm.h"
 #include "query.h"
 #include "settings.h"
@@ -43,7 +44,7 @@ bool grabbing;
 node_t *grabbed_node;
 
 /* Snap preview window */
-static xcb_window_t snap_preview_win = XCB_NONE;
+static bspwm_wid_t snap_preview_win = BSPWM_WID_NONE;
 static snap_zone_t current_snap_zone = SNAP_NONE;
 static monitor_t *snap_target_monitor = NULL;
 
@@ -60,11 +61,11 @@ void pointer_init(void)
 
 
 
-void window_grab_button(xcb_window_t win, uint8_t button, uint16_t modifier)
+void window_grab_button(bspwm_wid_t win, uint8_t button, uint16_t modifier)
 {
 #define GRAB(b, m) \
 	xcb_grab_button(dpy, false, win, XCB_EVENT_MASK_BUTTON_PRESS, \
-	                XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE, b, m)
+	                XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, BSPWM_WID_NONE, BSPWM_WID_NONE, b, m)
 	GRAB(button, modifier);
 	if (num_lock != XCB_NO_SYMBOL && caps_lock != XCB_NO_SYMBOL && scroll_lock != XCB_NO_SYMBOL) {
 		GRAB(button, modifier | num_lock | caps_lock | scroll_lock);
@@ -90,11 +91,11 @@ void window_grab_button(xcb_window_t win, uint8_t button, uint16_t modifier)
 #undef GRAB
 }
 
-void window_grab_buttons(xcb_window_t win)
+void window_grab_buttons(bspwm_wid_t win)
 {
 	for (unsigned int i = 0; i < LENGTH(BUTTONS); i++) {
 		if (click_to_focus == (int8_t)XCB_BUTTON_INDEX_ANY || click_to_focus == (int8_t)BUTTONS[i])
-			window_grab_button(win, BUTTONS[i], XCB_NONE);
+			window_grab_button(win, BUTTONS[i], BSPWM_WID_NONE);
 		if (pointer_actions[i] != ACTION_NONE)
 			window_grab_button(win, BUTTONS[i], pointer_modifier);
 	}
@@ -124,7 +125,7 @@ void ungrab_buttons(void)
 	}
 }
 
-int16_t modfield_from_keysym(xcb_keysym_t keysym)
+int16_t modfield_from_keysym(uint32_t keysym)
 {
 	uint16_t modfield = 0;
 	xcb_keycode_t *keycodes = NULL, *mod_keycodes = NULL;
@@ -166,13 +167,13 @@ end:
 	return modfield;
 }
 
-resize_handle_t get_handle(node_t *n, xcb_point_t pos, pointer_action_t pac)
+resize_handle_t get_handle(node_t *n, bspwm_point_t pos, pointer_action_t pac)
 {
 	if (!n)
 		return HANDLE_BOTTOM_RIGHT;
 
 	resize_handle_t rh = HANDLE_BOTTOM_RIGHT;
-	xcb_rectangle_t rect = get_rectangle(NULL, NULL, n);
+	bspwm_rect_t rect = get_rectangle(NULL, NULL, n);
 	
 	if (rect.width == 0 || rect.height == 0)
 		return rh;
@@ -218,8 +219,8 @@ resize_handle_t get_handle(node_t *n, xcb_point_t pos, pointer_action_t pac)
 
 bool grab_pointer(pointer_action_t pac)
 {
-	xcb_window_t win = XCB_NONE;
-	xcb_point_t pos;
+	bspwm_wid_t win = BSPWM_WID_NONE;
+	bspwm_point_t pos;
 
 	query_pointer(&win, &pos);
 
@@ -228,7 +229,7 @@ bool grab_pointer(pointer_action_t pac)
 	if (!locate_window(win, &loc)) {
 		if (pac == ACTION_FOCUS) {
 			monitor_t *m = monitor_from_point(pos);
-			if (m && m != mon && (win == XCB_NONE || win == m->root)) {
+			if (m && m != mon && (win == BSPWM_WID_NONE || win == m->root)) {
 				focus_node(m, m->desk, m->desk->focus);
 				return true;
 			}
@@ -253,7 +254,7 @@ bool grab_pointer(pointer_action_t pac)
 		xcb_grab_pointer(dpy, 0, root, 
 		                 XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_BUTTON_MOTION,
 		                 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, 
-		                 XCB_NONE, XCB_NONE, XCB_CURRENT_TIME), NULL);
+		                 BSPWM_WID_NONE, BSPWM_WID_NONE, XCB_CURRENT_TIME), NULL);
 
 	if (!reply || reply->status != XCB_GRAB_STATUS_SUCCESS) {
 		free(reply);
@@ -277,7 +278,7 @@ bool grab_pointer(pointer_action_t pac)
 	return true;
 }
 
-void track_pointer(coordinates_t loc, pointer_action_t pac, xcb_point_t pos)
+void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 {
 	node_t *n = loc.node;
 	if (!n || !n->client)
@@ -320,7 +321,7 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, xcb_point_t pos)
 
 				/* Check for edge snap zones while dragging */
 				if (edge_snap_enabled) {
-					xcb_point_t cur_pos = {e->root_x, e->root_y};
+					bspwm_point_t cur_pos = {e->root_x, e->root_y};
 					monitor_t *m = monitor_from_point(cur_pos);
 					/* Only process snap if pointer is on a valid monitor */
 					if (m != NULL) {
@@ -383,7 +384,7 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, xcb_point_t pos)
 		          loc.monitor->id, loc.desktop->id, n->id);
 	}
 
-	xcb_rectangle_t r = get_rectangle(NULL, NULL, n);
+	bspwm_rect_t r = get_rectangle(NULL, NULL, n);
 	put_status(SBSC_MASK_NODE_GEOMETRY, "node_geometry 0x%08X 0x%08X 0x%08X %ux%u+%i+%i\n",
 	          loc.monitor->id, loc.desktop->id, loc.node->id, r.width, r.height, r.x, r.y);
 
@@ -393,7 +394,7 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, xcb_point_t pos)
 		for (node_t *f = first_extrema(loc.desktop->root); f; f = next_leaf(f, loc.desktop->root)) {
 			if (f == n || !f->client || !IS_TILED(f->client))
 				continue;
-			xcb_rectangle_t r = f->client->tiled_rectangle;
+			bspwm_rect_t r = f->client->tiled_rectangle;
 			put_status(SBSC_MASK_NODE_GEOMETRY, "node_geometry 0x%08X 0x%08X 0x%08X %ux%u+%i+%i\n",
 			          loc.monitor->id, loc.desktop->id, f->id, r.width, r.height, r.x, r.y);
 		}
@@ -404,12 +405,12 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, xcb_point_t pos)
  * Windows-like edge snap zones
  * Detect which snap zone the pointer is in based on screen edges
  */
-snap_zone_t get_snap_zone(xcb_point_t pos, monitor_t *m)
+snap_zone_t get_snap_zone(bspwm_point_t pos, monitor_t *m)
 {
 	if (!edge_snap_enabled || !m)
 		return SNAP_NONE;
 
-	xcb_rectangle_t rect = m->rectangle;
+	bspwm_rect_t rect = m->rectangle;
 	int threshold = edge_snap_threshold;
 
 	bool at_left = pos.x <= rect.x + threshold;
@@ -457,7 +458,7 @@ void apply_snap_zone(coordinates_t *loc, monitor_t *target_monitor, snap_zone_t 
 	if (!d)
 		return;
 
-	xcb_rectangle_t rect = m->rectangle;
+	bspwm_rect_t rect = m->rectangle;
 
 	/* Account for padding with underflow protection */
 	int pad_h = m->padding.left + m->padding.right;
@@ -467,7 +468,7 @@ void apply_snap_zone(coordinates_t *loc, monitor_t *target_monitor, snap_zone_t 
 	rect.width = (pad_h < rect.width) ? rect.width - pad_h : 1;
 	rect.height = (pad_v < rect.height) ? rect.height - pad_v : 1;
 
-	xcb_rectangle_t target = {0, 0, 0, 0};
+	bspwm_rect_t target = {0, 0, 0, 0};
 
 	switch (zone) {
 		case SNAP_LEFT:
@@ -536,13 +537,13 @@ void show_snap_preview(monitor_t *m, snap_zone_t zone)
 	}
 
 	/* Check if zone AND monitor are the same - only skip redraw if both match */
-	if (zone == current_snap_zone && m == snap_target_monitor && snap_preview_win != XCB_NONE)
+	if (zone == current_snap_zone && m == snap_target_monitor && snap_preview_win != BSPWM_WID_NONE)
 		return;
 
 	current_snap_zone = zone;
 	snap_target_monitor = m;
 
-	xcb_rectangle_t rect = m->rectangle;
+	bspwm_rect_t rect = m->rectangle;
 	int pad_h = m->padding.left + m->padding.right;
 	int pad_v = m->padding.top + m->padding.bottom;
 	rect.x += m->padding.left;
@@ -550,7 +551,7 @@ void show_snap_preview(monitor_t *m, snap_zone_t zone)
 	rect.width = (pad_h < rect.width) ? rect.width - pad_h : 1;
 	rect.height = (pad_v < rect.height) ? rect.height - pad_v : 1;
 
-	xcb_rectangle_t preview = {0, 0, 0, 0};
+	bspwm_rect_t preview = {0, 0, 0, 0};
 
 	switch (zone) {
 		case SNAP_LEFT:
@@ -598,7 +599,7 @@ void show_snap_preview(monitor_t *m, snap_zone_t zone)
 	}
 
 	/* Create or update preview window */
-	if (snap_preview_win == XCB_NONE) {
+	if (snap_preview_win == BSPWM_WID_NONE) {
 		snap_preview_win = xcb_generate_id(dpy);
 		uint32_t mask = XCB_CW_BACK_PIXEL | XCB_CW_BORDER_PIXEL | XCB_CW_OVERRIDE_REDIRECT;
 		uint32_t values[] = {0x40E6007A, 0xE6007A, 1};  /* Semi-transparent pink */
@@ -623,7 +624,7 @@ void show_snap_preview(monitor_t *m, snap_zone_t zone)
  */
 void hide_snap_preview(void)
 {
-	if (snap_preview_win != XCB_NONE) {
+	if (snap_preview_win != BSPWM_WID_NONE) {
 		xcb_unmap_window(dpy, snap_preview_win);
 		xcb_flush(dpy);
 	}
@@ -635,9 +636,9 @@ void hide_snap_preview(void)
  */
 void destroy_snap_preview(void)
 {
-	if (snap_preview_win != XCB_NONE) {
+	if (snap_preview_win != BSPWM_WID_NONE) {
 		xcb_destroy_window(dpy, snap_preview_win);
-		snap_preview_win = XCB_NONE;
+		snap_preview_win = BSPWM_WID_NONE;
 		xcb_flush(dpy);
 	}
 	current_snap_zone = SNAP_NONE;

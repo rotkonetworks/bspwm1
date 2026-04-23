@@ -26,6 +26,7 @@
 #include <string.h>
 #include "bspwm.h"
 #include "desktop.h"
+#include "events.h"
 #include "history.h"
 #include "parse.h"
 #include "monitor.h"
@@ -98,7 +99,7 @@ void query_monitor(monitor_t *m, FILE *rsp)
 	fprintf(rsp, "{");
 	fprintf(rsp, "\"name\":\"%s\",", m->name);
 	fprintf(rsp, "\"id\":%u,", m->id);
-	fprintf(rsp, "\"randrId\":%u,", m->randr_id);
+	fprintf(rsp, "\"randrId\":%u,", m->output_id);
 	fprintf(rsp, "\"wired\":%s,", BOOL_STR(m->wired));
 	fprintf(rsp, "\"stickyCount\":%i,", m->sticky_count);
 	fprintf(rsp, "\"windowGap\":%i,", m->window_gap);
@@ -226,7 +227,7 @@ void query_client(client_t *c, FILE *rsp)
 	}
 }
 
-void query_rectangle(xcb_rectangle_t r, FILE *rsp)
+void query_rectangle(bspwm_rect_t r, FILE *rsp)
 {
 	if (!rsp) return;
 	fprintf(rsp, "{\"x\":%i,\"y\":%i,\"width\":%u,\"height\":%u}", r.x, r.y, r.width, r.height);
@@ -442,28 +443,28 @@ void print_modifier_mask(uint16_t m, FILE *rsp)
 	if (!rsp) return;
 	
 	switch (m) {
-		case XCB_MOD_MASK_SHIFT:
+		case BSP_MOD_MASK_SHIFT:
 			fprintf(rsp, "shift");
 			break;
-		case XCB_MOD_MASK_CONTROL:
+		case BSP_MOD_MASK_CONTROL:
 			fprintf(rsp, "control");
 			break;
-		case XCB_MOD_MASK_LOCK:
+		case BSP_MOD_MASK_LOCK:
 			fprintf(rsp, "lock");
 			break;
-		case XCB_MOD_MASK_1:
+		case BSP_MOD_MASK_1:
 			fprintf(rsp, "mod1");
 			break;
-		case XCB_MOD_MASK_2:
+		case BSP_MOD_MASK_2:
 			fprintf(rsp, "mod2");
 			break;
-		case XCB_MOD_MASK_3:
+		case BSP_MOD_MASK_3:
 			fprintf(rsp, "mod3");
 			break;
-		case XCB_MOD_MASK_4:
+		case BSP_MOD_MASK_4:
 			fprintf(rsp, "mod4");
 			break;
-		case XCB_MOD_MASK_5:
+		case BSP_MOD_MASK_5:
 			fprintf(rsp, "mod5");
 			break;
 	}
@@ -474,16 +475,16 @@ void print_button_index(int8_t b, FILE *rsp)
 	if (!rsp) return;
 	
 	switch (b) {
-		case XCB_BUTTON_INDEX_ANY:
+		case BSP_BUTTON_ANY:
 			fprintf(rsp, "any");
 			break;
-		case XCB_BUTTON_INDEX_1:
+		case BSP_BUTTON_1:
 			fprintf(rsp, "button1");
 			break;
-		case XCB_BUTTON_INDEX_2:
+		case BSP_BUTTON_2:
 			fprintf(rsp, "button2");
 			break;
-		case XCB_BUTTON_INDEX_3:
+		case BSP_BUTTON_3:
 			fprintf(rsp, "button3");
 			break;
 		case -1:
@@ -568,7 +569,7 @@ void print_rule_consequence(char **buf, rule_consequence_t *csq)
 		*buf = NULL;
 }
 
-void print_rectangle(char **buf, xcb_rectangle_t *rect)
+void print_rectangle(char **buf, bspwm_rect_t *rect)
 {
 	if (!buf) return;
 	
@@ -709,7 +710,7 @@ int node_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst)
 	} else if (streq("smallest", desc)) {
 		find_by_area(AREA_SMALLEST, ref, dst, &sel);
 	} else if (streq("pointed", desc)) {
-		xcb_window_t win = XCB_NONE;
+		bspwm_wid_t win = BSPWM_WID_NONE;
 		query_pointer(&win, NULL);
 		if (locate_leaf(win, dst) && node_matches(dst, ref, &sel)) {
 			return SELECTOR_OK;
@@ -987,7 +988,7 @@ int monitor_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst)
 			dst->monitor = mon;
 		}
 	} else if (streq("pointed", desc)) {
-		xcb_point_t pointer;
+		bspwm_point_t pointer;
 		query_pointer(NULL, &pointer);
 		for (monitor_t *m = mon_head; m; m = m->next) {
 			if (is_inside(pointer, m->rectangle)) {
@@ -1027,7 +1028,7 @@ end:
 	return SELECTOR_OK;
 }
 
-bool locate_leaf(xcb_window_t win, coordinates_t *loc)
+bool locate_leaf(bspwm_wid_t win, coordinates_t *loc)
 {
 	if (!loc) return false;
 	
@@ -1046,7 +1047,7 @@ bool locate_leaf(xcb_window_t win, coordinates_t *loc)
 	return false;
 }
 
-bool locate_window(xcb_window_t win, coordinates_t *loc)
+bool locate_window(bspwm_wid_t win, coordinates_t *loc)
 {
 	if (!loc) return false;
 	

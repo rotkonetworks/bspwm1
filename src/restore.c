@@ -138,7 +138,7 @@ bool restore_state(const char *file_path)
 			for (int j = 0; j < s; j++) {
 				monitor_t *m = restore_monitor(&t, json);
 				if (m->desk == NULL) {
-					add_desktop(m, make_desktop(NULL, XCB_NONE));
+					add_desktop(m, make_desktop(NULL, BSPWM_WID_NONE));
 				}
 				add_monitor(m);
 			}
@@ -188,9 +188,9 @@ bool restore_state(const char *file_path)
 	}
 
 	for (monitor_t *m = mon_head; m != NULL; m = m->next) {
-		m->id = xcb_generate_id(dpy);
+		m->id = ++clients_count;
 		for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
-			d->id = xcb_generate_id(dpy);
+			d->id = ++clients_count;
 			regenerate_ids_in(d->root);
 			refresh_presel_feedbacks(m, d, d->root);
 			restack_presel_feedbacks(d);
@@ -200,8 +200,7 @@ bool restore_state(const char *file_path)
 					continue;
 				}
 				initialize_client(n);
-				uint32_t values[] = {CLIENT_EVENT_MASK | (focus_follows_pointer ? XCB_EVENT_MASK_ENTER_WINDOW : 0)};
-				xcb_change_window_attributes(dpy, n->id, XCB_CW_EVENT_MASK, values);
+				backend_window_listen_enter(n->id, focus_follows_pointer);
 				window_grab_buttons(n->id);
 			}
 		}
@@ -265,7 +264,7 @@ monitor_t *restore_monitor(jsmntok_t **t, char *json)
 			(*t)++;
 			snprintf(m->name, (*t)->end - (*t)->start + 1, "%s", json + (*t)->start);
 		RESTORE_UINT(id, &m->id)
-		RESTORE_UINT(randrId, &m->randr_id)
+		RESTORE_UINT(randrId, &m->output_id)
 		RESTORE_BOOL(wired, &m->wired)
 		RESTORE_UINT(stickyCount, &m->sticky_count)
 		RESTORE_INT(windowGap, &m->window_gap)
@@ -313,7 +312,7 @@ desktop_t *restore_desktop(jsmntok_t **t, char *json)
 	int s = (*t)->size;
 	(*t)++;
 	desktop_t *d = make_desktop(NULL, UINT32_MAX);
-	xcb_window_t focusedNodeId = XCB_NONE;
+	bspwm_wid_t focusedNodeId = BSPWM_WID_NONE;
 
 	for (int i = 0; i < s; i++) {
 		if (keyeq("name", *t, json)) {
@@ -342,7 +341,7 @@ desktop_t *restore_desktop(jsmntok_t **t, char *json)
 		(*t)++;
 	}
 
-	if (focusedNodeId != XCB_NONE) {
+	if (focusedNodeId != BSPWM_WID_NONE) {
 		d->focus = find_by_id_in(d->root, focusedNodeId);
 	}
 
@@ -484,7 +483,7 @@ client_t *restore_client(jsmntok_t **t, char *json)
 	}
 }
 
-void restore_rectangle(xcb_rectangle_t *r, jsmntok_t **t, char *json)
+void restore_rectangle(bspwm_rect_t *r, jsmntok_t **t, char *json)
 {
 	int s = (*t)->size;
 	(*t)++;

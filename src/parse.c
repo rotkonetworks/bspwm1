@@ -286,7 +286,7 @@ bool parse_index(char *s, uint16_t *idx)
 }
 
 // optimized rectangle parser - manual parsing instead of sscanf
-bool parse_rectangle(char *s, xcb_rectangle_t *r)
+bool parse_rectangle(char *s, bspwm_rect_t *r)
 {
    char *end;
 
@@ -318,14 +318,14 @@ static const struct {
    const char *key;
    uint16_t mask;
 } modifier_table[] = {
-   {"control", XCB_MOD_MASK_CONTROL},
-   {"lock", XCB_MOD_MASK_LOCK},
-   {"mod1", XCB_MOD_MASK_1},
-   {"mod2", XCB_MOD_MASK_2},
-   {"mod3", XCB_MOD_MASK_3},
-   {"mod4", XCB_MOD_MASK_4},
-   {"mod5", XCB_MOD_MASK_5},
-   {"shift", XCB_MOD_MASK_SHIFT}
+   {"control", BSP_MOD_MASK_CONTROL},
+   {"lock", BSP_MOD_MASK_LOCK},
+   {"mod1", BSP_MOD_MASK_1},
+   {"mod2", BSP_MOD_MASK_2},
+   {"mod3", BSP_MOD_MASK_3},
+   {"mod4", BSP_MOD_MASK_4},
+   {"mod5", BSP_MOD_MASK_5},
+   {"shift", BSP_MOD_MASK_SHIFT}
 };
 
 bool parse_modifier_mask(char *s, uint16_t *m)
@@ -350,7 +350,7 @@ bool parse_button_index(char *s, int8_t *b)
    switch (s[0]) {
        case 'a':
            if (strcmp(s, "any") == 0) {
-               *b = XCB_BUTTON_INDEX_ANY;
+               *b = BSP_BUTTON_ANY;
                return true;
            }
            break;

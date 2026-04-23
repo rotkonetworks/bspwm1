@@ -37,8 +37,6 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <string.h>
-#include <xcb/xinerama.h>
-#include <xcb/xcb_aux.h>
 #include "types.h"
 #include "desktop.h"
 #include "monitor.h"
@@ -53,13 +51,17 @@
 #include "rule.h"
 #include "restore.h"
 #include "query.h"
+#include "keybind.h"
 #include "bspwm.h"
 
-xcb_connection_t *dpy;
+#ifdef BACKEND_X11
+#include "backend_x11.h"
+#endif
+
+/* Global state */
 int default_screen, screen_width, screen_height;
 uint32_t clients_count;
-xcb_screen_t *screen;
-xcb_window_t root;
+bspwm_wid_t root;
 char config_path[MAXLEN];
 
 monitor_t *mon;
@@ -78,11 +80,8 @@ subscriber_list_t *subscribe_tail;
 pending_rule_t *pending_rule_head;
 pending_rule_t *pending_rule_tail;
 
-xcb_window_t meta_window;
+bspwm_wid_t meta_window;
 motion_recorder_t motion_recorder;
-xcb_atom_t WM_STATE;
-xcb_atom_t WM_TAKE_FOCUS;
-xcb_atom_t WM_DELETE_WINDOW;
 int exit_status;
 int epoll_fd;
 
@@ -103,7 +102,6 @@ int main(int argc, char *argv[])
 	int sock_fd = -1, cli_fd, dpy_fd, n;
 	struct sockaddr_un sock_address;
 	char msg[BUFSIZ] = {0};
-	xcb_generic_event_t *event;
 	char *end;
 	int opt;
 
@@ -143,9 +141,11 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	dpy = xcb_connect(NULL, &default_screen);
+	if (backend_init(&default_screen) != 0) {
+		err("Can't open display.\n");
+	}
 
-	if (!check_connection(dpy)) {
+	if (!backend_check_connection()) {
 		exit(EXIT_FAILURE);
 	}
 
@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
 		adopt_orphans();
 	}
 
-	dpy_fd = xcb_get_file_descriptor(dpy);
+	dpy_fd = backend_get_fd();
 
 	if (sock_fd == -1) {
 		char *sp = getenv(SOCKET_ENV_VAR);
@@ -167,7 +167,7 @@ int main(int argc, char *argv[])
 		} else {
 			char *host = NULL;
 			int dn = 0, sn = 0;
-			if (xcb_parse_display(NULL, &host, &dn, &sn) != 0) {
+			if (backend_parse_display(&host, &dn, &sn)) {
 				snprintf(socket_path, sizeof(socket_path), SOCKET_PATH_TPL, host, dn, sn);
 			}
 			free(host);
@@ -175,14 +175,12 @@ int main(int argc, char *argv[])
 
 		sock_address.sun_family = AF_UNIX;
 
-		/* Validate socket path length before attempting copy */
 		size_t socket_path_len = strlen(socket_path);
 		if (socket_path_len >= sizeof(sock_address.sun_path)) {
 			err("Socket path too long (%zu >= %zu): %s\n",
 			    socket_path_len, sizeof(sock_address.sun_path), socket_path);
 		}
 
-		/* Safe copy - length already validated */
 		strcpy(sock_address.sun_path, socket_path);
 
 		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -197,7 +195,6 @@ int main(int argc, char *argv[])
 			err("Couldn't bind a name to the socket.\n");
 		}
 
-		/* Restrict socket to owner only */
 		chmod(socket_path, 0600);
 
 		if (listen(sock_fd, SOMAXCONN) == -1) {
@@ -227,9 +224,9 @@ int main(int argc, char *argv[])
 	sigaction(SIGINT, &sigact, NULL);
 	sigaction(SIGHUP, &sigact, NULL);
 	sigaction(SIGTERM, &sigact, NULL);
-	/* Avoid SIG_IGN for SIGPIPE as it persists across exec */
 	sigaction(SIGPIPE, &sigact, NULL);
 	run_config(run_level);
+	backend_grab_keys();
 	running = true;
 
 	#define MAX_EPOLL_EVENTS 16
@@ -237,7 +234,7 @@ int main(int argc, char *argv[])
 
 	while (running) {
 
-		xcb_flush(dpy);
+		backend_flush();
 
 		int nfds = epoll_wait(epoll_fd, ep_events, MAX_EPOLL_EVENTS, -1);
 		if (nfds == -1) {
@@ -257,7 +254,7 @@ int main(int argc, char *argv[])
 				if (pr->fd == fd) {
 					if (manage_window(pr->win, pr->csq, pr->fd)) {
 						for (event_queue_t *eq = pr->event_head; eq != NULL; eq = eq->next) {
-							handle_event(&eq->event);
+							handle_event(eq->data);
 						}
 					}
 					remove_pending_rule(pr);
@@ -272,7 +269,6 @@ int main(int argc, char *argv[])
 			if (fd == sock_fd) {
 				cli_fd = accept(sock_fd, NULL, 0);
 				if (cli_fd > 0) {
-					/* Verify peer is same user - reject other users */
 					struct ucred cred;
 					socklen_t len = sizeof(cred);
 					if (getsockopt(cli_fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == -1 ||
@@ -293,22 +289,23 @@ int main(int argc, char *argv[])
 					}
 				}
 			} else if (fd == dpy_fd) {
+#ifdef BACKEND_X11
 				xcb_aux_sync(dpy);
+				xcb_generic_event_t *event;
 				while ((event = xcb_poll_for_event(dpy)) != NULL) {
 					handle_event(event);
 					free(event);
 				}
+#else
+				backend_dispatch_events();
+#endif
 			}
 		}
 
-		if (!check_connection(dpy)) {
+		if (!backend_check_connection()) {
 			running = false;
 		}
 
-		/* Prune dead subscribers lazily - the write() probe is a
-		 * syscall per subscriber, too expensive for every wake.
-		 * Most dead subscribers are already caught by put_status()
-		 * fflush failures; this catches fully idle ones. */
 		static unsigned int prune_counter;
 		if (++prune_counter >= 64) {
 			prune_counter = 0;
@@ -319,7 +316,7 @@ int main(int argc, char *argv[])
 	if (restart) {
 		char *host = NULL;
 		int dn = 0, sn = 0;
-		if (xcb_parse_display(NULL, &host, &dn, &sn) != 0) {
+		if (backend_parse_display(&host, &dn, &sn)) {
 			snprintf(state_path, sizeof(state_path), STATE_PATH_TPL, host, dn, sn);
 		}
 		free(host);
@@ -329,14 +326,11 @@ int main(int argc, char *argv[])
 	}
 
 	cleanup();
-	scratch_destroy();  /* Free arena memory */
+	scratch_destroy();
 	ungrab_buttons();
-	xcb_ewmh_connection_wipe(ewmh);
-	xcb_destroy_window(dpy, meta_window);
-	xcb_destroy_window(dpy, motion_recorder.id);
-	free(ewmh);
-	xcb_flush(dpy);
-	xcb_disconnect(dpy);
+	backend_destroy_window(meta_window);
+	backend_destroy_window(motion_recorder.id);
+	backend_destroy();
 
 	if (restart) {
 		fcntl(sock_fd, F_SETFD, ~FD_CLOEXEC & fcntl(sock_fd, F_GETFD));
@@ -389,7 +383,6 @@ void init(void)
 	subscribe_head = subscribe_tail = NULL;
 	pending_rule_head = pending_rule_tail = NULL;
 	auto_raise = sticky_still = hide_sticky = record_history = true;
-	randr_base = 0;
 	exit_status = 0;
 	restart = false;
 }
@@ -397,131 +390,67 @@ void init(void)
 void setup(void)
 {
 	init();
-	scratch_init();  /* Arena for temporary allocations */
-	ewmh_init();
+	scratch_init();
+	keybind_init();
+
+#ifdef BACKEND_X11
+	backend_ewmh_init();
 	pointer_init();
-
-	screen = xcb_setup_roots_iterator(xcb_get_setup(dpy)).data;
-
-	if (screen == NULL) {
-		err("Can't acquire the default screen.\n");
+	x11_setup_screen();
+	root = backend_get_root();
+	if (!backend_register_root_events()) {
+		backend_destroy();
+		err("Another window manager is already running.\n");
 	}
+	backend_get_screen_size(&screen_width, &screen_height);
 
-	root = screen->root;
-	register_events();
+	/* Create internal windows via backend */
+	bspwm_rect_t meta_rect = {-1, -1, 1, 1};
+	meta_window = backend_create_internal_window("meta", meta_rect, true);
 
-	screen_width = screen->width_in_pixels;
-	screen_height = screen->height_in_pixels;
-
-	meta_window = xcb_generate_id(dpy);
-	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, meta_window, root, -1, -1, 1, 1, 0, XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, XCB_NONE, NULL);
-	xcb_icccm_set_wm_class(dpy, meta_window, sizeof(META_WINDOW_IC), META_WINDOW_IC);
-
-	motion_recorder.id = xcb_generate_id(dpy);
+	bspwm_rect_t mr_rect = {0, 0, 1, 1};
+	motion_recorder.id = backend_create_internal_window("motion_recorder", mr_rect, true);
 	motion_recorder.sequence = 0;
 	motion_recorder.enabled = false;
-	uint32_t values[] = {XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_POINTER_MOTION};
-	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, motion_recorder.id, root, 0, 0, 1, 1, 0,
-	                  XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, XCB_CW_EVENT_MASK, values);
-	xcb_icccm_set_wm_class(dpy, motion_recorder.id, sizeof(MOTION_RECORDER_IC), MOTION_RECORDER_IC);
 
-	xcb_atom_t net_atoms[] = {ewmh->_NET_SUPPORTED,
-	                          ewmh->_NET_SUPPORTING_WM_CHECK,
-	                          ewmh->_NET_DESKTOP_NAMES,
-	                          ewmh->_NET_DESKTOP_VIEWPORT,
-	                          ewmh->_NET_NUMBER_OF_DESKTOPS,
-	                          ewmh->_NET_CURRENT_DESKTOP,
-	                          ewmh->_NET_CLIENT_LIST,
-	                          ewmh->_NET_ACTIVE_WINDOW,
-	                          ewmh->_NET_CLOSE_WINDOW,
-	                          ewmh->_NET_WM_STRUT_PARTIAL,
-	                          ewmh->_NET_WM_DESKTOP,
-	                          ewmh->_NET_WM_STATE,
-	                          ewmh->_NET_WM_STATE_HIDDEN,
-	                          ewmh->_NET_WM_STATE_FULLSCREEN,
-	                          ewmh->_NET_WM_STATE_BELOW,
-	                          ewmh->_NET_WM_STATE_ABOVE,
-	                          ewmh->_NET_WM_STATE_STICKY,
-	                          ewmh->_NET_WM_STATE_DEMANDS_ATTENTION,
-	                          ewmh->_NET_WM_WINDOW_TYPE,
-	                          ewmh->_NET_WM_WINDOW_TYPE_DOCK,
-	                          ewmh->_NET_WM_WINDOW_TYPE_DESKTOP,
-	                          ewmh->_NET_WM_WINDOW_TYPE_NOTIFICATION,
-	                          ewmh->_NET_WM_WINDOW_TYPE_DIALOG,
-	                          ewmh->_NET_WM_WINDOW_TYPE_UTILITY,
-	                          ewmh->_NET_WM_WINDOW_TYPE_TOOLBAR};
-
-	xcb_ewmh_set_supported(ewmh, default_screen, LENGTH(net_atoms), net_atoms);
+	x11_setup_ewmh_supported();
 	ewmh_set_supporting(meta_window);
+	x11_setup_atoms();
+	x11_setup_randr();
 
-#define GETATOM(a) \
-	get_atom(#a, &a);
-	GETATOM(WM_STATE)
-	GETATOM(WM_DELETE_WINDOW)
-	GETATOM(WM_TAKE_FOCUS)
-#undef GETATOM
-
-	const xcb_query_extension_reply_t *qep = xcb_get_extension_data(dpy, &xcb_randr_id);
-	if (qep->present && update_monitors()) {
-		randr = true;
-		randr_base = qep->first_event;
-		xcb_randr_select_input(dpy, root, XCB_RANDR_NOTIFY_MASK_SCREEN_CHANGE);
-	} else {
+	if (randr && update_monitors()) {
+		/* monitors set up via RandR */
+	} else if (!randr || !mon_head) {
 		randr = false;
 		warn("Couldn't retrieve monitors via RandR.\n");
-		bool xinerama_is_active = false;
-
-		if (xcb_get_extension_data(dpy, &xcb_xinerama_id)->present) {
-			xcb_xinerama_is_active_reply_t *xia = xcb_xinerama_is_active_reply(dpy, xcb_xinerama_is_active(dpy), NULL);
-			if (xia != NULL) {
-				xinerama_is_active = xia->state;
-				free(xia);
-			}
-		}
-
-		if (xinerama_is_active) {
-			xcb_xinerama_query_screens_reply_t *xsq = xcb_xinerama_query_screens_reply(dpy, xcb_xinerama_query_screens(dpy), NULL);
-			xcb_xinerama_screen_info_t *xsi = xcb_xinerama_query_screens_screen_info(xsq);
-			int n = xcb_xinerama_query_screens_screen_info_length(xsq);
-			for (int i = 0; i < n; i++) {
-				xcb_xinerama_screen_info_t info = xsi[i];
-				xcb_rectangle_t rect = (xcb_rectangle_t) {info.x_org, info.y_org, info.width, info.height};
-				monitor_t *m = make_monitor(NULL, &rect, XCB_NONE);
-				add_monitor(m);
-				add_desktop(m, make_desktop(NULL, XCB_NONE));
-			}
-			free(xsq);
-		} else {
-			warn("Xinerama is inactive.\n");
-			xcb_rectangle_t rect = (xcb_rectangle_t) {0, 0, screen_width, screen_height};
-			monitor_t *m = make_monitor(NULL, &rect, XCB_NONE);
-			add_monitor(m);
-			add_desktop(m, make_desktop(NULL, XCB_NONE));
-		}
+		/* Fallback: single screen */
+		bspwm_rect_t rect = {0, 0, screen_width, screen_height};
+		monitor_t *m = make_monitor(NULL, &rect, BSPWM_WID_NONE);
+		add_monitor(m);
+		add_desktop(m, make_desktop(NULL, BSPWM_WID_NONE));
 	}
+#endif
+
+#ifndef BACKEND_X11
+	/* Wayland: outputs were created during backend_init, but setup
+	 * wasn't ready yet. Re-query outputs now. */
+	root = backend_get_root();
+	backend_get_screen_size(&screen_width, &screen_height);
+	if (!update_monitors()) {
+		bspwm_rect_t rect = {0, 0, screen_width, screen_height};
+		monitor_t *m = make_monitor(NULL, &rect, BSPWM_WID_NONE);
+		add_monitor(m);
+		add_desktop(m, make_desktop(NULL, BSPWM_WID_NONE));
+	}
+	if (mon_head && !mon)
+		mon = mon_head;
+#endif
 
 	ewmh_update_number_of_desktops();
 	ewmh_update_desktop_names();
 	ewmh_update_desktop_viewport();
 	ewmh_update_current_desktop();
-	xcb_get_input_focus_reply_t *ifo = xcb_get_input_focus_reply(dpy, xcb_get_input_focus(dpy), NULL);
-	if (ifo != NULL && (ifo->focus == XCB_INPUT_FOCUS_POINTER_ROOT || ifo->focus == XCB_NONE)) {
-		clear_input_focus();
-	}
-	free(ifo);
-}
-
-void register_events(void)
-{
-	uint32_t values[] = {ROOT_EVENT_MASK};
-	xcb_generic_error_t *e = xcb_request_check(dpy, xcb_change_window_attributes_checked(dpy, root, XCB_CW_EVENT_MASK, values));
-	if (e != NULL) {
-		free(e);
-		xcb_ewmh_connection_wipe(ewmh);
-		free(ewmh);
-		xcb_disconnect(dpy);
-		err("Another window manager is already running.\n");
-	}
+	clear_input_focus();
 }
 
 void cleanup(void)
@@ -544,43 +473,6 @@ void cleanup(void)
 	empty_history();
 }
 
-bool check_connection (xcb_connection_t *dpy)
-{
-	int xerr;
-	if ((xerr = xcb_connection_has_error(dpy)) != 0) {
-		warn("The server closed the connection: ");
-		switch (xerr) {
-			case XCB_CONN_ERROR:
-				warn("socket, pipe or stream error.\n");
-				break;
-			case XCB_CONN_CLOSED_EXT_NOTSUPPORTED:
-				warn("unsupported extension.\n");
-				break;
-			case XCB_CONN_CLOSED_MEM_INSUFFICIENT:
-				warn("not enough memory.\n");
-				break;
-			case XCB_CONN_CLOSED_REQ_LEN_EXCEED:
-				warn("request length exceeded.\n");
-				break;
-			case XCB_CONN_CLOSED_PARSE_ERR:
-				warn("can't parse display string.\n");
-				break;
-			case XCB_CONN_CLOSED_INVALID_SCREEN:
-				warn("invalid screen.\n");
-				break;
-			case XCB_CONN_CLOSED_FDPASSING_FAILED:
-				warn("failed to pass FD.\n");
-				break;
-			default:
-				warn("unknown error.\n");
-				break;
-		}
-		return false;
-	} else {
-		return true;
-	}
-}
-
 void sig_handler(int sig)
 {
 	if (sig == SIGCHLD) {
@@ -588,18 +480,5 @@ void sig_handler(int sig)
 			;
 	} else if (sig == SIGINT || sig == SIGHUP || sig == SIGTERM) {
 		running = 0;
-	}
-}
-
-/* Adapted from i3wm */
-uint32_t get_color_pixel(const char *color)
-{
-	unsigned int red, green, blue;
-	if (sscanf(color + 1, "%02x%02x%02x", &red, &green, &blue) == 3) {
-		/* We set the first 8 bits high to have 100% opacity in case of a 32 bit
-		 * color depth visual. */
-		return (0xFF << 24) | (red << 16 | green << 8 | blue);
-	} else {
-		return screen->black_pixel;
 	}
 }

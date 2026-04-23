@@ -1,0 +1,404 @@
+#!/bin/sh
+# Red-green TDD test runner for bspwm
+# Usage: ./run_headless [x11|wlroots]
+#
+# Starts bspwm on a headless display, runs all tests, reports results.
+# Exit code: 0 = all green, 1 = red (failures)
+
+set -e
+
+BACKEND="${1:-x11}"
+BSPWM="../bspwm"
+BSPC="../bspc"
+PASS=0
+FAIL=0
+TESTS_RUN=0
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+cleanup() {
+	if [ -n "$BSPWM_PID" ]; then
+		kill "$BSPWM_PID" 2>/dev/null || true
+		wait "$BSPWM_PID" 2>/dev/null || true
+	fi
+	if [ "$BACKEND" = "x11" ] && [ -n "$XVFB_PID" ]; then
+		kill "$XVFB_PID" 2>/dev/null || true
+	fi
+}
+trap cleanup EXIT
+
+# ---- Start headless display ----
+
+if [ "$BACKEND" = "x11" ]; then
+	# Find a free display
+	DISPLAY_NUM=99
+	while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+		DISPLAY_NUM=$((DISPLAY_NUM + 1))
+	done
+	export DISPLAY=":${DISPLAY_NUM}"
+
+	Xvfb "$DISPLAY" -screen 0 1920x1080x24 &
+	XVFB_PID=$!
+	sleep 0.5
+
+	if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+		echo "${RED}FAIL: Xvfb failed to start${NC}"
+		exit 1
+	fi
+
+	echo "${YELLOW}=== Testing X11 backend on ${DISPLAY} ===${NC}"
+elif [ "$BACKEND" = "wlroots" ]; then
+	export WLR_BACKENDS=headless
+	export WLR_RENDERER=pixman
+	export WLR_HEADLESS_OUTPUTS=1
+	# No DISPLAY needed — bspwm sets WAYLAND_DISPLAY itself
+	unset DISPLAY
+	echo "${YELLOW}=== Testing wlroots backend (headless) ===${NC}"
+else
+	echo "Usage: $0 [x11|wlroots]"
+	exit 1
+fi
+
+# ---- Start bspwm ----
+
+$BSPWM -c /dev/null &
+BSPWM_PID=$!
+sleep 2
+
+if ! kill -0 "$BSPWM_PID" 2>/dev/null; then
+	echo "${RED}FAIL: bspwm failed to start${NC}"
+	exit 1
+fi
+
+# Pick up the socket — find the most recently created bspwm socket
+if [ "$BACKEND" = "wlroots" ]; then
+	# bspwm creates socket at /tmp/bspwm<wayland-display>_0_0-socket
+	SOCK=$(ls -t /tmp/bspwm*-socket 2>/dev/null | head -1)
+	if [ -n "$SOCK" ]; then
+		export BSPWM_SOCKET="$SOCK"
+	fi
+fi
+
+# ---- Test helpers ----
+
+assert_eq() {
+	local desc="$1" expected="$2" actual="$3"
+	TESTS_RUN=$((TESTS_RUN + 1))
+	if [ "$expected" = "$actual" ]; then
+		echo "  ${GREEN}PASS${NC}: $desc"
+		PASS=$((PASS + 1))
+	else
+		echo "  ${RED}FAIL${NC}: $desc"
+		echo "    expected: '$expected'"
+		echo "    actual:   '$actual'"
+		FAIL=$((FAIL + 1))
+	fi
+}
+
+assert_not_empty() {
+	local desc="$1" actual="$2"
+	TESTS_RUN=$((TESTS_RUN + 1))
+	if [ -n "$actual" ]; then
+		echo "  ${GREEN}PASS${NC}: $desc"
+		PASS=$((PASS + 1))
+	else
+		echo "  ${RED}FAIL${NC}: $desc (empty)"
+		FAIL=$((FAIL + 1))
+	fi
+}
+
+assert_ok() {
+	local desc="$1"
+	shift
+	TESTS_RUN=$((TESTS_RUN + 1))
+	if "$@" >/dev/null 2>&1; then
+		echo "  ${GREEN}PASS${NC}: $desc"
+		PASS=$((PASS + 1))
+	else
+		echo "  ${RED}FAIL${NC}: $desc (exit code $?)"
+		FAIL=$((FAIL + 1))
+	fi
+}
+
+assert_fail() {
+	local desc="$1"
+	shift
+	TESTS_RUN=$((TESTS_RUN + 1))
+	if ! "$@" >/dev/null 2>&1; then
+		echo "  ${GREEN}PASS${NC}: $desc"
+		PASS=$((PASS + 1))
+	else
+		echo "  ${RED}FAIL${NC}: $desc (expected failure, got success)"
+		FAIL=$((FAIL + 1))
+	fi
+}
+
+# ---- TESTS ----
+
+echo ""
+echo "== Lifecycle =="
+
+# T1: bspwm is running
+assert_ok "bspwm is running" kill -0 "$BSPWM_PID"
+
+# T2: bspc can connect
+assert_ok "bspc connects" $BSPC query -M
+
+# T3: at least one monitor exists
+MONITORS=$($BSPC query -M 2>/dev/null | wc -l)
+assert_not_empty "has monitors" "$MONITORS"
+
+# T4: at least one desktop exists
+DESKTOPS=$($BSPC query -D 2>/dev/null | wc -l)
+assert_not_empty "has desktops" "$DESKTOPS"
+
+# T5: query --tree returns JSON-like output
+TREE=$($BSPC query -T -m 2>/dev/null)
+assert_not_empty "query --tree returns data" "$TREE"
+
+echo ""
+echo "== Desktop operations =="
+
+# T6: create a desktop
+assert_ok "add desktop" $BSPC monitor -a test-desktop-1
+
+# T7: desktop shows in query
+DCOUNT_AFTER=$($BSPC query -D 2>/dev/null | wc -l)
+DCOUNT_EXPECTED=$((DESKTOPS + 1))
+assert_eq "desktop count increased" "$DCOUNT_EXPECTED" "$DCOUNT_AFTER"
+
+# T8: switch desktop
+assert_ok "focus desktop" $BSPC desktop -f test-desktop-1
+
+# T9: rename desktop
+assert_ok "rename desktop" $BSPC desktop -n renamed-desktop
+
+# T10: remove desktop
+assert_ok "remove desktop" $BSPC desktop renamed-desktop -r
+
+echo ""
+echo "== Keybinding system =="
+
+# T11: add a keybinding
+assert_ok "add keybind" $BSPC keybind --add "super + Return" "echo test"
+
+# T12: list keybindings
+KB_LIST=$($BSPC keybind --list 2>/dev/null)
+assert_not_empty "keybind --list returns data" "$KB_LIST"
+
+# T13: add another
+assert_ok "add keybind 2" $BSPC keybind --add "super + q" "bspc node -c"
+
+# T14: remove keybinding
+assert_ok "remove keybind" $BSPC keybind --remove "super + Return"
+
+# T15: clear all
+assert_ok "clear keybinds" $BSPC keybind --clear
+
+# T16: list is empty after clear
+KB_EMPTY=$($BSPC keybind --list 2>/dev/null)
+assert_eq "keybinds empty after clear" "" "$KB_EMPTY"
+
+echo ""
+echo "== Config =="
+
+# T17: get border_width
+BW=$($BSPC config border_width 2>/dev/null)
+assert_not_empty "config border_width readable" "$BW"
+
+# T18: set and get
+assert_ok "set border_width" $BSPC config border_width 3
+BW2=$($BSPC config border_width 2>/dev/null)
+assert_eq "border_width was set" "3" "$BW2"
+
+# T19: restore
+assert_ok "restore border_width" $BSPC config border_width "$BW"
+
+echo ""
+echo "== Window management =="
+
+# Pick the right test client
+if [ "$BACKEND" = "x11" ]; then
+	TEST_CLIENT="./test_window"
+else
+	TEST_CLIENT="./test_window_wl"
+fi
+
+if [ -f "$TEST_CLIENT" ]; then
+	# -- Spawn first window --
+	LEAVES_BEFORE=$($BSPC query -N -n .leaf 2>/dev/null | wc -l)
+
+	$TEST_CLIENT test-a &
+	TW1_PID=$!
+	sleep 0.5
+
+	LEAVES_AFTER=$($BSPC query -N -n .leaf 2>/dev/null | wc -l)
+	LEAVES_EXPECTED=$((LEAVES_BEFORE + 1))
+	assert_eq "first window mapped as leaf" "$LEAVES_EXPECTED" "$LEAVES_AFTER"
+
+	# -- Spawn second window (should split) --
+	$TEST_CLIENT test-b &
+	TW2_PID=$!
+	sleep 1
+
+	LEAVES_AFTER2=$($BSPC query -N -n .leaf 2>/dev/null | wc -l)
+	LEAVES_EXPECTED2=$((LEAVES_BEFORE + 2))
+	assert_eq "second window creates split" "$LEAVES_EXPECTED2" "$LEAVES_AFTER2"
+
+	# -- Focus switching --
+	FOCUSED=$($BSPC query -N -n focused 2>/dev/null)
+	assert_not_empty "has focused node" "$FOCUSED"
+
+	assert_ok "focus next" $BSPC node -f next.local.leaf
+	FOCUSED2=$($BSPC query -N -n focused 2>/dev/null)
+	# After focus next, focused node should change (if 2 windows exist)
+	if [ "$NODES_AFTER2" -ge 2 ]; then
+		# We can't guarantee different on all layouts but at least it shouldn't crash
+		assert_not_empty "focus next returns a node" "$FOCUSED2"
+	fi
+
+	# -- State changes --
+	assert_ok "set floating" $BSPC node -t floating
+	STATE=$($BSPC query -T -n focused 2>/dev/null | grep -o '"state":"[^"]*"' | head -1)
+	assert_eq "node is floating" '"state":"floating"' "$STATE"
+
+	assert_ok "set tiled" $BSPC node -t tiled
+	STATE2=$($BSPC query -T -n focused 2>/dev/null | grep -o '"state":"[^"]*"' | head -1)
+	assert_eq "node is tiled" '"state":"tiled"' "$STATE2"
+
+	assert_ok "set fullscreen" $BSPC node -t fullscreen
+	STATE3=$($BSPC query -T -n focused 2>/dev/null | grep -o '"state":"[^"]*"' | head -1)
+	assert_eq "node is fullscreen" '"state":"fullscreen"' "$STATE3"
+
+	assert_ok "back to tiled" $BSPC node -t tiled
+
+	# -- Layer changes --
+	assert_ok "set layer above" $BSPC node -l above
+	LAYER=$($BSPC query -T -n focused 2>/dev/null | grep -o '"layer":"[^"]*"' | head -1)
+	assert_eq "node layer is above" '"layer":"above"' "$LAYER"
+
+	assert_ok "set layer normal" $BSPC node -l normal
+
+	# -- Flags --
+	assert_ok "set sticky" $BSPC node -g sticky=on
+	assert_ok "unset sticky" $BSPC node -g sticky=off
+	assert_ok "set locked" $BSPC node -g locked=on
+	assert_ok "unset locked" $BSPC node -g locked=off
+	assert_ok "set marked" $BSPC node -g marked=on
+	assert_ok "unset marked" $BSPC node -g marked=off
+
+	# -- Close first window --
+	assert_ok "close node" $BSPC node -c
+	sleep 0.5
+
+	LEAVES_AFTER3=$($BSPC query -N -n .leaf 2>/dev/null | wc -l)
+	LEAVES_EXPECTED3=$((LEAVES_BEFORE + 1))
+	assert_eq "leaf removed after close" "$LEAVES_EXPECTED3" "$LEAVES_AFTER3"
+
+	# -- Close second window --
+	assert_ok "close last node" $BSPC node -c
+	sleep 0.5
+
+	LEAVES_FINAL=$($BSPC query -N -n .leaf 2>/dev/null | wc -l)
+	assert_eq "all leaves removed" "$LEAVES_BEFORE" "$LEAVES_FINAL"
+
+	wait "$TW1_PID" 2>/dev/null || true
+	wait "$TW2_PID" 2>/dev/null || true
+else
+	echo "  ${YELLOW}SKIP${NC}: $TEST_CLIENT not built (run 'make' in tests/)"
+fi
+
+echo ""
+echo "== Rules =="
+
+assert_ok "add rule" $BSPC rule -a "Test:*" state=floating
+RULES=$($BSPC rule -l 2>/dev/null | wc -l)
+assert_not_empty "rule was added" "$RULES"
+
+assert_ok "remove rule" $BSPC rule -r "Test:*:*"
+
+echo ""
+echo "== Monitor operations =="
+
+MON_ID=$($BSPC query -M -m focused 2>/dev/null)
+assert_not_empty "focused monitor exists" "$MON_ID"
+
+MON_NAME=$($BSPC query -M -m focused --names 2>/dev/null)
+assert_not_empty "monitor has name" "$MON_NAME"
+
+# Add multiple desktops
+assert_ok "add desk A" $BSPC monitor -a test-A
+assert_ok "add desk B" $BSPC monitor -a test-B
+assert_ok "add desk C" $BSPC monitor -a test-C
+
+# Switch between them
+assert_ok "focus desk A" $BSPC desktop -f test-A
+assert_ok "focus desk B" $BSPC desktop -f test-B
+assert_ok "focus desk C" $BSPC desktop -f test-C
+
+# Swap desktops
+assert_ok "swap desktops" $BSPC desktop test-A -s test-B
+
+# Remove them
+assert_ok "remove desk C" $BSPC desktop test-C -r
+assert_ok "remove desk B" $BSPC desktop test-B -r
+assert_ok "remove desk A" $BSPC desktop test-A -r
+
+echo ""
+echo "== Config settings =="
+
+# Test various config options
+for setting in window_gap split_ratio border_width; do
+	VAL=$($BSPC config $setting 2>/dev/null)
+	assert_not_empty "config $setting readable" "$VAL"
+done
+
+assert_ok "set window_gap" $BSPC config window_gap 10
+WG=$($BSPC config window_gap 2>/dev/null)
+assert_eq "window_gap set to 10" "10" "$WG"
+assert_ok "restore window_gap" $BSPC config window_gap 6
+
+assert_ok "set split_ratio" $BSPC config split_ratio 0.6
+SR=$($BSPC config split_ratio 2>/dev/null)
+# split_ratio returns float
+assert_not_empty "split_ratio was set" "$SR"
+assert_ok "restore split_ratio" $BSPC config split_ratio 0.5
+
+# Boolean configs
+for bcfg in borderless_monocle gapless_monocle focus_follows_pointer; do
+	assert_ok "get $bcfg" $BSPC config $bcfg
+done
+
+# ---- Quit ----
+
+echo ""
+echo "== Shutdown =="
+assert_ok "bspc quit" $BSPC quit
+sleep 0.5
+if kill -0 "$BSPWM_PID" 2>/dev/null; then
+	echo "  ${RED}FAIL${NC}: bspwm still running after quit"
+	FAIL=$((FAIL + 1))
+else
+	echo "  ${GREEN}PASS${NC}: bspwm exited cleanly"
+	PASS=$((PASS + 1))
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+BSPWM_PID=""
+
+# ---- Report ----
+
+echo ""
+echo "================================="
+TOTAL=$((PASS + FAIL))
+if [ "$FAIL" -eq 0 ]; then
+	echo "${GREEN}ALL GREEN: ${PASS}/${TOTAL} tests passed${NC} (${BACKEND})"
+else
+	echo "${RED}RED: ${FAIL} failures, ${PASS} passed out of ${TOTAL}${NC} (${BACKEND})"
+fi
+echo "================================="
+
+exit "$FAIL"

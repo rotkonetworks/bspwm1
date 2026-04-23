@@ -51,14 +51,14 @@ static inline void batch_ewmh_update(void)
 	ewmh_update_current_desktop();
 }
 
-monitor_t *make_monitor(const char *name, xcb_rectangle_t *rect, uint32_t id)
+monitor_t *make_monitor(const char *name, bspwm_rect_t *rect, uint32_t id)
 {
 	monitor_t *m = calloc(1, sizeof(monitor_t));
 	if (!m)
 		return NULL;
 
-	m->id = (id == XCB_NONE) ? xcb_generate_id(dpy) : id;
-	m->randr_id = XCB_NONE;
+	m->id = (id == BSPWM_WID_NONE) ? ++clients_count : id;
+	m->output_id = BSPWM_OUTPUT_NONE;
 
 	if (name && *name) {
 		strncpy(m->name, name, sizeof(m->name) - 1);
@@ -71,7 +71,7 @@ monitor_t *make_monitor(const char *name, xcb_rectangle_t *rect, uint32_t id)
 	m->padding = padding;
 	m->border_width = border_width;
 	m->window_gap = window_gap;
-	m->root = XCB_NONE;
+	m->root = BSPWM_WID_NONE;
 	m->prev = m->next = NULL;
 	m->desk = m->desk_head = m->desk_tail = NULL;
 	m->wired = true;
@@ -80,28 +80,21 @@ monitor_t *make_monitor(const char *name, xcb_rectangle_t *rect, uint32_t id)
 	if (rect) {
 		update_root(m, rect);
 	} else {
-		m->rectangle = (xcb_rectangle_t) {0, 0, screen_width, screen_height};
+		m->rectangle = (bspwm_rect_t) {0, 0, screen_width, screen_height};
 	}
 	return m;
 }
 
-void update_root(monitor_t *m, xcb_rectangle_t *rect)
+void update_root(monitor_t *m, bspwm_rect_t *rect)
 {
 	if (!m || !rect)
 		return;
 
-	xcb_rectangle_t last_rect = m->rectangle;
+	bspwm_rect_t last_rect = m->rectangle;
 	m->rectangle = *rect;
 
-	if (m->root == XCB_NONE) {
-		uint32_t values[] = {XCB_EVENT_MASK_ENTER_WINDOW};
-		m->root = xcb_generate_id(dpy);
-		xcb_create_window(dpy, XCB_COPY_FROM_PARENT, m->root, root,
-		                  rect->x, rect->y, rect->width, rect->height, 0,
-		                  XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, XCB_CW_EVENT_MASK, values);
-		xcb_icccm_set_wm_class(dpy, m->root, sizeof(ROOT_WINDOW_IC), ROOT_WINDOW_IC);
-		xcb_icccm_set_wm_name(dpy, m->root, XCB_ATOM_STRING, 8, strlen(m->name), m->name);
-		xcb_ewmh_set_wm_window_type(ewmh, m->root, 1, &ewmh->_NET_WM_WINDOW_TYPE_DESKTOP);
+	if (m->root == BSPWM_WID_NONE) {
+		m->root = backend_create_internal_window("monitor_root", *rect, true);
 		window_lower(m->root);
 		if (focus_follows_pointer)
 			window_show(m->root);
@@ -148,7 +141,6 @@ void rename_monitor(monitor_t *m, const char *name)
 
 	strncpy(m->name, name, sizeof(m->name) - 1);
 	m->name[sizeof(m->name) - 1] = '\0';
-	xcb_icccm_set_wm_name(dpy, m->root, XCB_ATOM_STRING, 8, strlen(m->name), m->name);
 
 	put_status(SBSC_MASK_REPORT);
 }
@@ -162,10 +154,10 @@ monitor_t *find_monitor(uint32_t id)
 	return NULL;
 }
 
-monitor_t *get_monitor_by_randr_id(xcb_randr_output_t id)
+monitor_t *get_monitor_by_output_id(bspwm_output_id_t id)
 {
 	for (monitor_t *m = mon_head; m; m = m->next) {
-		if (m->randr_id == id)
+		if (m->output_id == id)
 			return m;
 	}
 	return NULL;
@@ -188,7 +180,7 @@ void embrace_client(monitor_t *m, client_t *c)
 	}
 }
 
-void adapt_geometry(xcb_rectangle_t *rs, xcb_rectangle_t *rd, node_t *n)
+void adapt_geometry(bspwm_rect_t *rs, bspwm_rect_t *rd, node_t *n)
 {
 	if (!rs || !rd || !n)
 		return;
@@ -198,7 +190,7 @@ void adapt_geometry(xcb_rectangle_t *rs, xcb_rectangle_t *rd, node_t *n)
 			continue;
 
 		client_t *c = f->client;
-		xcb_rectangle_t *cr = &c->floating_rectangle;
+		bspwm_rect_t *cr = &c->floating_rectangle;
 
 		int left_adjust = MAX((rs->x - cr->x), 0);
 		int top_adjust = MAX((rs->y - cr->y), 0);
@@ -243,7 +235,7 @@ void add_monitor(monitor_t *m)
 	if (!m)
 		return;
 
-	xcb_rectangle_t r = m->rectangle;
+	bspwm_rect_t r = m->rectangle;
 
 	if (!mon) {
 		mon = mon_head = mon_tail = m;
@@ -304,7 +296,7 @@ void remove_monitor(monitor_t *m)
 
 	monitor_t *last_mon = mon;
 	unlink_monitor(m);
-	xcb_destroy_window(dpy, m->root);
+	backend_destroy_window(m->root);
 	free(m);
 
 	if (mon != last_mon)
@@ -379,12 +371,12 @@ monitor_t *closest_monitor(monitor_t *m, cycle_dir_t dir, monitor_select_t *sel)
 	return NULL;
 }
 
-bool is_inside_monitor(monitor_t *m, xcb_point_t pt)
+bool is_inside_monitor(monitor_t *m, bspwm_point_t pt)
 {
 	return m && is_inside(pt, m->rectangle);
 }
 
-monitor_t *monitor_from_point(xcb_point_t pt)
+monitor_t *monitor_from_point(bspwm_point_t pt)
 {
 	for (monitor_t *m = mon_head; m; m = m->next) {
 		if (is_inside_monitor(m, pt))
@@ -398,20 +390,20 @@ monitor_t *monitor_from_client(client_t *c)
 	if (!c)
 		return NULL;
 
-	xcb_rectangle_t *cr = &c->floating_rectangle;
+	bspwm_rect_t *cr = &c->floating_rectangle;
 	if (cr->width > INT16_MAX || cr->height > INT16_MAX ||
 	    cr->x > INT16_MAX - cr->width/2 || cr->y > INT16_MAX - cr->height/2)
 		return mon_head;
 
 	int16_t xc = cr->x + cr->width/2;
 	int16_t yc = cr->y + cr->height/2;
-	xcb_point_t pt = {xc, yc};
+	bspwm_point_t pt = {xc, yc};
 
 	monitor_t *nearest = monitor_from_point(pt);
 	if (!nearest) {
 		uint32_t dmin = UINT32_MAX;
 		for (monitor_t *m = mon_head; m; m = m->next) {
-			xcb_rectangle_t r = m->rectangle;
+			bspwm_rect_t r = m->rectangle;
 			uint32_t dx = (r.x + r.width/2 > xc) ? r.x + r.width/2 - xc : xc - r.x - r.width/2;
 			uint32_t dy = (r.y + r.height/2 > yc) ? r.y + r.height/2 - yc : yc - r.y - r.height/2;
 			uint32_t d = dx + dy;
@@ -431,7 +423,7 @@ monitor_t *nearest_monitor(monitor_t *m, direction_t dir, monitor_select_t *sel)
 
 	uint32_t dmin = UINT32_MAX;
 	monitor_t *nearest = NULL;
-	xcb_rectangle_t rect = m->rectangle;
+	bspwm_rect_t rect = m->rectangle;
 
 	for (monitor_t *f = mon_head; f; f = f->next) {
 		coordinates_t loc = {f, NULL, NULL};
@@ -461,68 +453,35 @@ bool find_any_monitor(coordinates_t *ref, coordinates_t *dst, monitor_select_t *
 	return false;
 }
 
+/* Query outputs from the backend and update monitor state.
+ * This replaces the old RandR-specific implementation. */
 bool update_monitors(void)
 {
-	xcb_randr_get_screen_resources_reply_t *sres = xcb_randr_get_screen_resources_reply(dpy, xcb_randr_get_screen_resources(dpy, root), NULL);
-	if (!sres)
+	bspwm_output_info_t outputs[MAX_MONITORS];
+	int len = backend_query_outputs(outputs, MAX_MONITORS);
+	if (len <= 0)
 		return false;
 
 	monitor_t *last_wired = NULL;
-	int len = xcb_randr_get_screen_resources_outputs_length(sres);
-	xcb_randr_output_t *outputs = xcb_randr_get_screen_resources_outputs(sres);
-
-	if (len < 0 || len > MAX_MONITORS) {
-		free(sres);
-		return false;
-	}
-
-	xcb_randr_get_output_info_cookie_t cookies[MAX_MONITORS];
-	for (int i = 0; i < len; i++)
-		cookies[i] = xcb_randr_get_output_info(dpy, outputs[i], XCB_CURRENT_TIME);
 
 	for (monitor_t *m = mon_head; m; m = m->next)
 		m->wired = false;
 
 	for (int i = 0; i < len; i++) {
-		xcb_randr_get_output_info_reply_t *info = xcb_randr_get_output_info_reply(dpy, cookies[i], NULL);
-		if (info) {
-			if (info->crtc != XCB_NONE) {
-				xcb_randr_get_crtc_info_reply_t *cir = xcb_randr_get_crtc_info_reply(dpy, xcb_randr_get_crtc_info(dpy, info->crtc, XCB_CURRENT_TIME), NULL);
-				if (cir) {
-					xcb_rectangle_t rect = {cir->x, cir->y, cir->width, cir->height};
-					last_wired = get_monitor_by_randr_id(outputs[i]);
-					if (last_wired) {
-						update_root(last_wired, &rect);
-						last_wired->wired = true;
-					} else {
-						char *name = (char *) xcb_randr_get_output_info_name(info);
-						size_t name_len = xcb_randr_get_output_info_name_length(info);
-						if (name_len > sizeof(((monitor_t*)0)->name) - 1)
-							name_len = sizeof(((monitor_t*)0)->name) - 1;
-						char name_copy[SMALEN];
-						strncpy(name_copy, name, name_len);
-						name_copy[name_len] = '\0';
-						last_wired = make_monitor(name_copy, &rect, XCB_NONE);
-						if (last_wired) {
-							last_wired->randr_id = outputs[i];
-							add_monitor(last_wired);
-						}
-					}
-					free(cir);
-				}
-			} else if (!remove_disabled_monitors && info->connection != XCB_RANDR_CONNECTION_DISCONNECTED) {
-				monitor_t *m = get_monitor_by_randr_id(outputs[i]);
-				if (m)
-					m->wired = true;
+		last_wired = get_monitor_by_output_id(outputs[i].id);
+		if (last_wired) {
+			update_root(last_wired, &outputs[i].rect);
+			last_wired->wired = true;
+		} else {
+			last_wired = make_monitor(outputs[i].name, &outputs[i].rect, BSPWM_WID_NONE);
+			if (last_wired) {
+				last_wired->output_id = outputs[i].id;
+				add_monitor(last_wired);
 			}
-			free(info);
 		}
-	}
 
-	xcb_randr_get_output_primary_reply_t *gpo = xcb_randr_get_output_primary_reply(dpy, xcb_randr_get_output_primary(dpy, root), NULL);
-	if (gpo) {
-		pri_mon = get_monitor_by_randr_id(gpo->output);
-		free(gpo);
+		if (outputs[i].primary && last_wired)
+			pri_mon = last_wired;
 	}
 
 	if (merge_overlapping_monitors) {
@@ -562,7 +521,7 @@ bool update_monitors(void)
 
 	for (monitor_t *m = mon_head; m; m = m->next) {
 		if (!m->desk)
-			add_desktop(m, make_desktop(NULL, XCB_NONE));
+			add_desktop(m, make_desktop(NULL, BSPWM_WID_NONE));
 	}
 
 	if (!running && mon) {
@@ -572,6 +531,5 @@ bool update_monitors(void)
 		ewmh_update_current_desktop();
 	}
 
-	free(sres);
 	return (mon != NULL);
 }

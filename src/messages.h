@@ -39,6 +39,7 @@ void cmd_wm(char **args, int num, FILE *rsp);
 void cmd_subscribe(char **args, int num, FILE *rsp);
 void cmd_quit(char **args, int num, FILE *rsp);
 void cmd_config(char **args, int num, FILE *rsp);
+void cmd_keybind(char **args, int num, FILE *rsp);
 void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp);
 void get_setting(coordinates_t loc, char *name, FILE* rsp);
 void handle_failure(int code, char *src, char *val, FILE *rsp);

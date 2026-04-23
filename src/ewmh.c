@@ -27,24 +27,17 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include "backend_x11.h"
 #include "bspwm.h"
 #include "settings.h"
 #include "tree.h"
 #include "ewmh.h"
 
-xcb_ewmh_connection_t *ewmh;
+/* ewmh is defined in backend_x11.c */
 
 void ewmh_init(void)
 {
-	ewmh = calloc(1, sizeof(xcb_ewmh_connection_t));
-	if (ewmh == NULL) {
-		err("Can't allocate EWMH connection.\n");
-	}
-	if (xcb_ewmh_init_atoms_replies(ewmh, xcb_ewmh_init_atoms(dpy, ewmh), NULL) == 0) {
-		free(ewmh);
-		ewmh = NULL;
-		err("Can't initialize EWMH atoms.\n");
-	}
+	backend_ewmh_init();
 }
 
 void ewmh_update_active_window(void)
@@ -214,7 +207,7 @@ bool ewmh_handle_struts(xcb_window_t win)
 	bool changed = false;
 	if (xcb_ewmh_get_wm_strut_partial_reply(ewmh, xcb_ewmh_get_wm_strut_partial(ewmh, win), &struts, NULL) == 1) {
 		for (monitor_t *m = mon_head; m != NULL; m = m->next) {
-			xcb_rectangle_t rect = m->rectangle;
+			bspwm_rect_t rect = m->rectangle;
 			if (rect.x < (int16_t) struts.left &&
 			    (int16_t) struts.left < (rect.x + rect.width - 1) &&
 			    (int16_t) struts.left_end_y >= rect.y &&

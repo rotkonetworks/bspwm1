@@ -50,7 +50,7 @@ void query_desktop(desktop_t *d, FILE *rsp);
 void query_node(node_t *n, FILE *rsp);
 void query_presel(presel_t *p, FILE *rsp);
 void query_client(client_t *c, FILE *rsp);
-void query_rectangle(xcb_rectangle_t r, FILE *rsp);
+void query_rectangle(bspwm_rect_t r, FILE *rsp);
 void query_constraints(constraints_t c, FILE *rsp);
 void query_padding(padding_t p, FILE *rsp);
 void query_history(FILE *rsp);
@@ -71,7 +71,7 @@ void print_button_index(int8_t b, FILE *rsp);
 void print_pointer_action(pointer_action_t a, FILE *rsp);
 void resolve_rule_consequence(rule_consequence_t *csq);
 void print_rule_consequence(char **buf, rule_consequence_t *csq);
-void print_rectangle(char **buf, xcb_rectangle_t *rect);
+void print_rectangle(char **buf, bspwm_rect_t *rect);
 
 #define QUERY_BUF_SIZE 1024
 typedef struct {
@@ -87,8 +87,8 @@ monitor_select_t make_monitor_select(void);
 int node_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst);
 int desktop_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst);
 int monitor_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst);
-__attribute__((warn_unused_result)) bool locate_leaf(xcb_window_t win, coordinates_t *loc);
-__attribute__((warn_unused_result)) bool locate_window(xcb_window_t win, coordinates_t *loc);
+__attribute__((warn_unused_result)) bool locate_leaf(bspwm_wid_t win, coordinates_t *loc);
+__attribute__((warn_unused_result)) bool locate_window(bspwm_wid_t win, coordinates_t *loc);
 __attribute__((warn_unused_result)) bool locate_desktop(char *name, coordinates_t *loc);
 __attribute__((warn_unused_result)) bool locate_monitor(char *name, coordinates_t *loc);
 __attribute__((warn_unused_result)) bool desktop_from_id(uint32_t id, coordinates_t *loc, monitor_t *mm);

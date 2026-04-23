@@ -33,7 +33,7 @@ bool parse_degree(char *s, int *d);
 bool parse_id(char *s, uint32_t *id);
 bool parse_bool_declaration(char *s, char **key, bool *value, alter_state_t *state);
 bool parse_index(char *s, uint16_t *idx);
-bool parse_rectangle(char *s, xcb_rectangle_t *r);
+bool parse_rectangle(char *s, bspwm_rect_t *r);
 bool parse_subscriber_mask(char *s, subscriber_mask_t *mask);
 bool parse_monitor_modifiers(char *desc, monitor_select_t *sel);
 bool parse_desktop_modifiers(char *desc, desktop_select_t *sel);

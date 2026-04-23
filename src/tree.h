@@ -29,7 +29,7 @@
 #define MIN_HEIGHT  32
 
 void arrange(monitor_t *m, desktop_t *d);
-void apply_layout(monitor_t *m, desktop_t *d, node_t *n, xcb_rectangle_t rect, xcb_rectangle_t root_rect);
+void apply_layout(monitor_t *m, desktop_t *d, node_t *n, bspwm_rect_t rect, bspwm_rect_t root_rect);
 presel_t *make_presel(void);
 bool set_type(node_t *n, split_type_t typ);
 bool set_ratio(node_t *n, double rat);
@@ -90,7 +90,7 @@ void rotate_tree_rec(node_t *n, int deg);
 void flip_tree(node_t *n, flip_t flp);
 void equalize_tree(node_t *n);
 int balance_tree(node_t *n);
-void adjust_ratios(node_t *n, xcb_rectangle_t rect);
+void adjust_ratios(node_t *n, bspwm_rect_t rect);
 void unlink_node(monitor_t *m, desktop_t *d, node_t *n);
 void close_node(node_t *n);
 void kill_node(monitor_t *m, desktop_t *d, node_t *n);
@@ -122,7 +122,7 @@ void set_private(monitor_t *m, desktop_t *d, node_t *n, bool value);
 void set_locked(monitor_t *m, desktop_t *d, node_t *n, bool value);
 void set_marked(monitor_t *m, desktop_t *d, node_t *n, bool value);
 void set_urgent(monitor_t *m, desktop_t *d, node_t *n, bool value);
-xcb_rectangle_t get_rectangle(monitor_t *m, desktop_t *d, node_t *n);
+bspwm_rect_t get_rectangle(monitor_t *m, desktop_t *d, node_t *n);
 void listen_enter_notify(node_t *n, bool enable);
 void regenerate_ids_in(node_t *n);
 

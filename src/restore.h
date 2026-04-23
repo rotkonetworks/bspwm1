@@ -33,7 +33,7 @@ desktop_t *restore_desktop(jsmntok_t **t, char *json);
 node_t *restore_node(jsmntok_t **t, char *json);
 presel_t *restore_presel(jsmntok_t **t, char *json);
 client_t *restore_client(jsmntok_t **t, char *json);
-void restore_rectangle(xcb_rectangle_t *r, jsmntok_t **t, char *json);
+void restore_rectangle(bspwm_rect_t *r, jsmntok_t **t, char *json);
 void restore_constraints(constraints_t *c, jsmntok_t **t, char *json);
 void restore_padding(padding_t *p, jsmntok_t **t, char *json);
 void restore_history(jsmntok_t **t, char *json);

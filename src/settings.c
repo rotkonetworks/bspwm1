@@ -83,8 +83,9 @@ int cascade_offset;
 void run_config(int run_level)
 {
 	if (fork() == 0) {
-		if (dpy != NULL) {
-			close(xcb_get_file_descriptor(dpy));
+		int dpy_fd = backend_get_fd();
+		if (dpy_fd >= 0) {
+			close(dpy_fd);
 		}
 		setsid();
 		char arg1[12];  /* enough for INT_MIN */

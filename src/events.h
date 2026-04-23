@@ -25,28 +25,33 @@
 #ifndef BSPWM_EVENTS_H
 #define BSPWM_EVENTS_H
 
-#include <xcb/xcb.h>
-#include <xcb/xcb_event.h>
+#include "types.h"
 
 #define ERROR_CODE_BAD_WINDOW  3
 
 extern uint8_t randr_base;
-static const xcb_button_index_t BUTTONS[] = {XCB_BUTTON_INDEX_1, XCB_BUTTON_INDEX_2, XCB_BUTTON_INDEX_3};
 
-void handle_event(xcb_generic_event_t *evt);
-void map_request(xcb_generic_event_t *evt);
-void configure_request(xcb_generic_event_t *evt);
-void configure_notify(xcb_generic_event_t *evt);
-void destroy_notify(xcb_generic_event_t *evt);
-void unmap_notify(xcb_generic_event_t *evt);
-void property_notify(xcb_generic_event_t *evt);
-void client_message(xcb_generic_event_t *evt);
-void focus_in(xcb_generic_event_t *evt);
-void button_press(xcb_generic_event_t *evt);
-void enter_notify(xcb_generic_event_t *evt);
-void motion_notify(xcb_generic_event_t *evt);
-void handle_state(monitor_t *m, desktop_t *d, node_t *n, xcb_atom_t state, unsigned int action);
-void mapping_notify(xcb_generic_event_t *evt);
-void process_error(xcb_generic_event_t *evt);
+/* Button list — values from backend.h */
+static const uint8_t BUTTONS[] = {BSP_BUTTON_1, BSP_BUTTON_2, BSP_BUTTON_3};
+
+/* Backend-specific event dispatch — the X11 backend calls these
+ * from its event loop; the wlroots backend calls them from
+ * its signal handlers. */
+void handle_event(void *evt);
+void map_request(void *evt);
+void configure_request(void *evt);
+void configure_notify(void *evt);
+void destroy_notify(void *evt);
+void unmap_notify(void *evt);
+void property_notify(void *evt);
+void client_message(void *evt);
+void focus_in(void *evt);
+void button_press(void *evt);
+void enter_notify(void *evt);
+void motion_notify(void *evt);
+void handle_state(monitor_t *m, desktop_t *d, node_t *n, uint32_t state, unsigned int action);
+void key_press(void *evt);
+void mapping_notify(void *evt);
+void process_error(void *evt);
 
 #endif

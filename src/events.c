@@ -22,6 +22,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <stdbool.h>
+#include "backend_x11.h"
+#include "keybind.h"
 #include "bspwm.h"
 #include "ewmh.h"
 #include "monitor.h"
@@ -34,9 +36,9 @@
 #include "rule.h"
 #include "events.h"
 
-uint8_t randr_base;
+/* randr_base is set in backend_x11.c */
 
-typedef void (*event_handler_t)(xcb_generic_event_t *);
+typedef void (*event_handler_t)(void *);
 static event_handler_t handlers[256] = {0};
 static bool handlers_initialized = false;
 
@@ -44,7 +46,7 @@ static void init_handlers(void)
 {
 	if (handlers_initialized)
 		return;
-		
+
 	handlers[XCB_MAP_REQUEST] = map_request;
 	handlers[XCB_DESTROY_NOTIFY] = destroy_notify;
 	handlers[XCB_UNMAP_NOTIFY] = unmap_notify;
@@ -56,20 +58,21 @@ static void init_handlers(void)
 	handlers[XCB_MOTION_NOTIFY] = motion_notify;
 	handlers[XCB_BUTTON_PRESS] = button_press;
 	handlers[XCB_FOCUS_IN] = focus_in;
+	handlers[XCB_KEY_PRESS] = key_press;
 	handlers[XCB_MAPPING_NOTIFY] = mapping_notify;
 	handlers[0] = process_error;
-	
+
 	handlers_initialized = true;
 }
 
-void handle_event(xcb_generic_event_t *evt)
+void handle_event(void *evt)
 {
 	if (!evt)
 		return;
 		
 	init_handlers();
 	
-	uint8_t resp_type = XCB_EVENT_RESPONSE_TYPE(evt);
+	uint8_t resp_type = ((xcb_generic_event_t *)evt)->response_type & 0x7f;
 	
 	if (handlers[resp_type]) {
 		handlers[resp_type](evt);
@@ -78,7 +81,7 @@ void handle_event(xcb_generic_event_t *evt)
 	}
 }
 
-void map_request(xcb_generic_event_t *evt)
+void map_request(void *evt)
 {
 	if (!evt)
 		return;
@@ -87,7 +90,7 @@ void map_request(xcb_generic_event_t *evt)
 	schedule_window(e->window);
 }
 
-void configure_request(xcb_generic_event_t *evt)
+void configure_request(void *evt)
 {
 	if (!evt)
 		return;
@@ -136,7 +139,7 @@ void configure_request(xcb_generic_event_t *evt)
 		apply_size_hints(c, &width, &height);
 		c->floating_rectangle.width = width;
 		c->floating_rectangle.height = height;
-		xcb_rectangle_t r = c->floating_rectangle;
+		bspwm_rect_t r = c->floating_rectangle;
 
 		if (c->border_width <= (unsigned)(INT16_MAX - r.x))
 			r.x -= c->border_width;
@@ -172,27 +175,15 @@ void configure_request(xcb_generic_event_t *evt)
 			}
 		}
 
-		xcb_configure_notify_event_t evt;
 		unsigned int bw = c->border_width;
-		xcb_rectangle_t r = (IS_FULLSCREEN(c) && loc.monitor) ? 
+		bspwm_rect_t r = (IS_FULLSCREEN(c) && loc.monitor) ?
 		                    loc.monitor->rectangle : c->tiled_rectangle;
 
-		evt.response_type = XCB_CONFIGURE_NOTIFY;
-		evt.event = e->window;
-		evt.window = e->window;
-		evt.above_sibling = XCB_NONE;
-		evt.x = r.x;
-		evt.y = r.y;
-		evt.width = r.width;
-		evt.height = r.height;
-		evt.border_width = bw;
-		evt.override_redirect = false;
-
-		xcb_send_event(dpy, false, e->window, XCB_EVENT_MASK_STRUCTURE_NOTIFY, (const char *) &evt);
+		backend_send_configure_notify(e->window, r, bw);
 	}
 }
 
-void configure_notify(xcb_generic_event_t *evt)
+void configure_notify(void *evt)
 {
 	if (!evt)
 		return;
@@ -205,7 +196,7 @@ void configure_notify(xcb_generic_event_t *evt)
 	}
 }
 
-void destroy_notify(xcb_generic_event_t *evt)
+void destroy_notify(void *evt)
 {
 	if (!evt)
 		return;
@@ -214,7 +205,7 @@ void destroy_notify(xcb_generic_event_t *evt)
 	unmanage_window(e->window);
 }
 
-void unmap_notify(xcb_generic_event_t *evt)
+void unmap_notify(void *evt)
 {
 	if (!evt)
 		return;
@@ -229,11 +220,11 @@ void unmap_notify(xcb_generic_event_t *evt)
 	if (!window_exists(e->window))
 		return;
 
-	set_window_state(e->window, XCB_ICCCM_WM_STATE_WITHDRAWN);
+	set_window_state(e->window, BSP_WM_STATE_WITHDRAWN);
 	unmanage_window(e->window);
 }
 
-void property_notify(xcb_generic_event_t *evt)
+void property_notify(void *evt)
 {
 	if (!evt)
 		return;
@@ -266,22 +257,18 @@ void property_notify(xcb_generic_event_t *evt)
 		return;
 
 	if (e->atom == XCB_ATOM_WM_HINTS) {
-		xcb_icccm_wm_hints_t hints;
-		if (xcb_icccm_get_wm_hints_reply(dpy, xcb_icccm_get_wm_hints(dpy, e->window), &hints, NULL) == 1 &&
-		    (hints.flags & XCB_ICCCM_WM_HINT_X_URGENCY)) {
-			set_urgent(loc.monitor, loc.desktop, loc.node, xcb_icccm_wm_hints_get_urgency(&hints));
-		}
+		bool urgent = backend_get_urgency(e->window);
+		set_urgent(loc.monitor, loc.desktop, loc.node, urgent);
 	} else if (e->atom == XCB_ATOM_WM_NORMAL_HINTS) {
 		client_t *c = loc.node->client;
-		if (xcb_icccm_get_wm_normal_hints_reply(dpy, xcb_icccm_get_wm_normal_hints(dpy, e->window), 
-		                                        &c->size_hints, NULL) == 1) {
+		if (backend_get_size_hints(e->window, &c->size_hints)) {
 			if (loc.monitor && loc.desktop)
 				arrange(loc.monitor, loc.desktop);
 		}
 	}
 }
 
-void client_message(xcb_generic_event_t *evt)
+void client_message(void *evt)
 {
 	if (!evt)
 		return;
@@ -333,7 +320,7 @@ void client_message(xcb_generic_event_t *evt)
 	}
 }
 
-void focus_in(xcb_generic_event_t *evt)
+void focus_in(void *evt)
 {
 	if (!evt)
 		return;
@@ -367,7 +354,7 @@ void focus_in(xcb_generic_event_t *evt)
 	}
 }
 
-void button_press(xcb_generic_event_t *evt)
+void button_press(void *evt)
 {
 	if (!evt)
 		return;
@@ -398,7 +385,7 @@ void button_press(xcb_generic_event_t *evt)
 	xcb_flush(dpy);
 }
 
-void enter_notify(xcb_generic_event_t *evt)
+void enter_notify(void *evt)
 {
 	if (!evt)
 		return;
@@ -425,7 +412,7 @@ void enter_notify(xcb_generic_event_t *evt)
 	update_motion_recorder();
 }
 
-void motion_notify(xcb_generic_event_t *evt)
+void motion_notify(void *evt)
 {
 	if (!evt)
 		return;
@@ -476,7 +463,7 @@ void motion_notify(xcb_generic_event_t *evt)
 			focus_node(loc.monitor, loc.desktop, loc.node);
 		}
 	} else {
-		xcb_point_t pt = {e->root_x, e->root_y};
+		bspwm_point_t pt = {e->root_x, e->root_y};
 		monitor_t *m = monitor_from_point(pt);
 		if (m && m != mon && m->desk) {
 			focus_node(m, m->desk, m->desk->focus);
@@ -488,7 +475,7 @@ void motion_notify(xcb_generic_event_t *evt)
 	auto_raise = true;
 }
 
-void handle_state(monitor_t *m, desktop_t *d, node_t *n, xcb_atom_t state, unsigned int action)
+void handle_state(monitor_t *m, desktop_t *d, node_t *n, uint32_t state, unsigned int action)
 {
 	if (!m || !d || !n || !n->client)
 		return;
@@ -579,7 +566,7 @@ void handle_state(monitor_t *m, desktop_t *d, node_t *n, xcb_atom_t state, unsig
 #undef HANDLE_WM_STATE
 }
 
-void mapping_notify(xcb_generic_event_t *evt)
+void mapping_notify(void *evt)
 {
 	if (!evt || mapping_events_count == 0)
 		return;
@@ -594,9 +581,35 @@ void mapping_notify(xcb_generic_event_t *evt)
 
 	ungrab_buttons();
 	grab_buttons();
+	backend_grab_keys();
 }
 
-void process_error(xcb_generic_event_t *evt)
+void key_press(void *evt)
+{
+	if (!evt)
+		return;
+
+	xcb_key_press_event_t *e = (xcb_key_press_event_t *)evt;
+
+	xcb_key_symbols_t *syms = xcb_key_symbols_alloc(dpy);
+	if (!syms)
+		return;
+
+	xcb_keysym_t keysym = xcb_key_symbols_get_keysym(syms, e->detail, 0);
+	xcb_key_symbols_free(syms);
+
+	/* Strip lock-key modifiers to match our KBMOD_* flags */
+	uint32_t modifiers = e->state & (BSP_MOD_MASK_SHIFT | BSP_MOD_MASK_CONTROL |
+	                                  BSP_MOD_MASK_1 | BSP_MOD_MASK_2 |
+	                                  BSP_MOD_MASK_3 | BSP_MOD_MASK_4 | BSP_MOD_MASK_5);
+
+	const char *cmd = keybind_match(modifiers, keysym);
+	if (cmd) {
+		keybind_exec(cmd);
+	}
+}
+
+void process_error(void *evt)
 {
 	if (!evt)
 		return;

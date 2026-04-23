@@ -25,9 +25,7 @@
 #ifndef BSPWM_POINTER_H
 #define BSPWM_POINTER_H
 
-#define XK_Num_Lock     0xff7f
-#define XK_Caps_Lock    0xffe5
-#define XK_Scroll_Lock  0xff14
+#include "types.h"
 
 extern uint16_t num_lock;
 extern uint16_t caps_lock;
@@ -37,17 +35,17 @@ extern bool grabbing;
 extern node_t *grabbed_node;
 
 void pointer_init(void);
-void window_grab_buttons(xcb_window_t win);
-void window_grab_button(xcb_window_t win, uint8_t button, uint16_t modifier);
+void window_grab_buttons(bspwm_wid_t win);
+void window_grab_button(bspwm_wid_t win, uint8_t button, uint16_t modifier);
 void grab_buttons(void);
 void ungrab_buttons(void);
-int16_t modfield_from_keysym(xcb_keysym_t keysym);
-resize_handle_t get_handle(node_t *n, xcb_point_t pos, pointer_action_t pac);
+int16_t modfield_from_keysym(uint32_t keysym);
+resize_handle_t get_handle(node_t *n, bspwm_point_t pos, pointer_action_t pac);
 bool grab_pointer(pointer_action_t pac);
-void track_pointer(coordinates_t loc, pointer_action_t pac, xcb_point_t pos);
+void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos);
 
 /* Windows-like edge snap */
-snap_zone_t get_snap_zone(xcb_point_t pos, monitor_t *m);
+snap_zone_t get_snap_zone(bspwm_point_t pos, monitor_t *m);
 void apply_snap_zone(coordinates_t *loc, monitor_t *target_monitor, snap_zone_t zone);
 void show_snap_preview(monitor_t *m, snap_zone_t zone);
 void hide_snap_preview(void);

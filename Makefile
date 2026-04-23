@@ -1,10 +1,31 @@
 VERCMD  ?= git describe --tags 2> /dev/null
 VERSION := $(shell $(VERCMD) || cat VERSION)
+BACKEND ?= x11
 
 CPPFLAGS += -D_POSIX_C_SOURCE=200809L -DVERSION=\"$(VERSION)\"
 CFLAGS   += -std=c23 -pedantic -Wall -Wextra -Wvla -Wformat=2 -Wformat-overflow=2 -Wformat-truncation=2 -Wnull-dereference -Wstack-protector -fstack-protector-strong -fstack-clash-protection -fcf-protection -O2 -D_FORTIFY_SOURCE=3 -DJSMN_STRICT
+
+# Core sources — backend-agnostic
+CORE_SRC = bspwm.c helpers.c geometry.c jsmn.c settings.c monitor.c desktop.c tree.c stack.c history.c \
+	 messages.c parse.c query.c restore.c rule.c subscribe.c keybind.c
+
+# Backend selection
+ifeq ($(BACKEND),x11)
+    BACKEND_SRC = backend_x11.c events.c pointer.c window.c ewmh.c
+    BACKEND_LIBS = -lxcb -lxcb-util -lxcb-keysyms -lxcb-icccm -lxcb-ewmh -lxcb-randr -lxcb-xinerama -lxcb-shape -lxkbcommon
+    CPPFLAGS += -DBACKEND_X11
+else ifeq ($(BACKEND),wlroots)
+    WLROOTS_DIR ?= ../wlroots
+    BACKEND_SRC = backend_wlr.c window_ops.c
+    BACKEND_LIBS = -L$(WLROOTS_DIR)/build -lwlroots-0.21 $(shell pkg-config --libs wayland-server xkbcommon 2>/dev/null)
+    CPPFLAGS += -DBACKEND_WLROOTS -DWLR_USE_UNSTABLE
+    CFLAGS += -I$(WLROOTS_DIR)/include -I$(WLROOTS_DIR)/build/include -I$(WLROOTS_DIR)/build/protocol $(shell pkg-config --cflags wayland-server libdrm pixman-1 xkbcommon 2>/dev/null)
+else
+    $(error Unknown BACKEND=$(BACKEND). Use x11 or wlroots)
+endif
+
 LDFLAGS  ?=
-LDLIBS    = $(LDFLAGS) -lm -lxcb -lxcb-util -lxcb-keysyms -lxcb-icccm -lxcb-ewmh -lxcb-randr -lxcb-xinerama -lxcb-shape
+LDLIBS    = $(LDFLAGS) -lm $(BACKEND_LIBS)
 
 PREFIX    ?= /usr/local
 BINPREFIX ?= $(PREFIX)/bin
@@ -15,14 +36,16 @@ FISHCPL   ?= $(PREFIX)/share/fish/vendor_completions.d
 ZSHCPL    ?= $(PREFIX)/share/zsh/site-functions
 
 MD_DOCS    = README.md doc/CHANGELOG.md doc/CONTRIBUTING.md doc/INSTALL.md doc/MISC.md doc/TODO.md
-XSESSIONS ?= $(PREFIX)/share/xsessions
+XSESSIONS  ?= $(PREFIX)/share/xsessions
+WLSESSIONS ?= $(PREFIX)/share/wayland-sessions
 CONFPREFIX ?= $(DESTDIR)$(HOME)/.config
 
-WM_SRC   = bspwm.c helpers.c geometry.c jsmn.c settings.c monitor.c desktop.c tree.c stack.c history.c \
-	 events.c pointer.c window.c messages.c parse.c query.c restore.c rule.c ewmh.c subscribe.c
+WM_SRC   = $(CORE_SRC) $(BACKEND_SRC)
 WM_OBJ  := $(WM_SRC:.c=.o)
 CLI_SRC  = bspc.c helpers.c
 CLI_OBJ := $(CLI_SRC:.c=.o)
+
+CLI_LIBS = -lxcb
 
 all: bspwm bspc
 
@@ -37,6 +60,7 @@ $(WM_OBJ) $(CLI_OBJ): Makefile
 
 bspwm: $(WM_OBJ)
 
+bspc: LDLIBS = $(CLI_LIBS)
 bspc: $(CLI_OBJ)
 
 install:
@@ -58,6 +82,8 @@ install:
 	cp -pr examples/* "$(DESTDIR)$(DOCPREFIX)"/examples
 	mkdir -p "$(DESTDIR)$(XSESSIONS)"
 	cp -p contrib/freedesktop/bspwm.desktop "$(DESTDIR)$(XSESSIONS)"
+	mkdir -p "$(DESTDIR)$(WLSESSIONS)"
+	cp -p contrib/freedesktop/bspwm-wayland.desktop "$(DESTDIR)$(WLSESSIONS)"
 
 install_cfg:
 	mkdir -p "$(CONFPREFIX)"/bspwm
@@ -76,6 +102,10 @@ uninstall:
 	rm -f "$(DESTDIR)$(ZSHCPL)"/_bspc
 	rm -rf "$(DESTDIR)$(DOCPREFIX)"
 	rm -f "$(DESTDIR)$(XSESSIONS)"/bspwm.desktop
+	rm -f "$(DESTDIR)$(WLSESSIONS)"/bspwm-wayland.desktop
+
+test: bspwm bspc
+	@cd tests && $(MAKE) && ./run_headless $(BACKEND)
 
 doc:
 	a2x -v -d manpage -f manpage -a revnumber=$(VERSION) doc/bspwm.1.asciidoc
@@ -83,4 +113,4 @@ doc:
 clean:
 	rm -f $(WM_OBJ) $(CLI_OBJ) bspwm bspc
 
-.PHONY: all debug install install_cfg uninstall doc clean
+.PHONY: all debug install install_cfg uninstall doc clean test

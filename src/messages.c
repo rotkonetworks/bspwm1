@@ -40,7 +40,9 @@
 #include "tree.h"
 #include "window.h"
 #include "common.h"
+#include <xkbcommon/xkbcommon.h>
 #include "parse.h"
+#include "keybind.h"
 #include "messages.h"
 
 void handle_message(char *msg, int msg_len, FILE *rsp)
@@ -99,6 +101,7 @@ static const command_entry_t command_table[] = {
 	{"wm", cmd_wm, false},
 	{"rule", cmd_rule, false},
 	{"config", cmd_config, false},
+	{"keybind", cmd_keybind, false},
 	{NULL, NULL, false}
 };
 
@@ -609,7 +612,7 @@ void cmd_node(char **args, int num, FILE *rsp)
 			}
 			if (IS_FLOATING(trg.node->client)) {
 				window_center(trg.monitor, trg.node->client);
-				xcb_rectangle_t *r = &trg.node->client->floating_rectangle;
+				bspwm_rect_t *r = &trg.node->client->floating_rectangle;
 				window_move_resize(trg.node->id, r->x, r->y, r->width, r->height);
 			}
 		} else if (streq("-c", *args) || streq("--close", *args)) {
@@ -910,7 +913,7 @@ void cmd_monitor(char **args, int num, FILE *rsp)
 			}
 			put_status(SBSC_MASK_REPORT);
 			while (num > 0) {
-				add_desktop(trg.monitor, make_desktop(*args, XCB_NONE));
+				add_desktop(trg.monitor, make_desktop(*args, BSPWM_WID_NONE));
 				num--, args++;
 			}
 			while (d != NULL) {
@@ -929,7 +932,7 @@ void cmd_monitor(char **args, int num, FILE *rsp)
 				return;
 			}
 			while (num > 0) {
-				add_desktop(trg.monitor, make_desktop(*args, XCB_NONE));
+				add_desktop(trg.monitor, make_desktop(*args, BSPWM_WID_NONE));
 				num--, args++;
 			}
 		} else if (streq("-r", *args) || streq("--remove", *args)) {
@@ -968,7 +971,7 @@ void cmd_monitor(char **args, int num, FILE *rsp)
 				fail(rsp, "monitor %s: Not enough arguments.\n", *(args - 1));
 				return;
 			}
-			xcb_rectangle_t r;
+			bspwm_rect_t r;
 			if (parse_rectangle(*args, &r)) {
 				update_root(trg.monitor, &r);
 			} else {
@@ -1304,11 +1307,11 @@ void cmd_wm(char **args, int num, FILE *rsp)
 			}
 			char *name = *args;
 			num--, args++;
-			xcb_rectangle_t r;
+			bspwm_rect_t r;
 			if (parse_rectangle(*args, &r)) {
-				monitor_t *m = make_monitor(name, &r, XCB_NONE);
+				monitor_t *m = make_monitor(name, &r, BSPWM_WID_NONE);
 				add_monitor(m);
-				add_desktop(m, make_desktop(NULL, XCB_NONE));
+				add_desktop(m, make_desktop(NULL, BSPWM_WID_NONE));
 			} else {
 				fail(rsp, "wm %s: Invalid argument: '%s'.\n", *(args - 1), *args);
 				break;
@@ -2093,5 +2096,105 @@ void fail(FILE *rsp, char *fmt, ...)
 	va_start(ap, fmt);
 	vfprintf(rsp, fmt, ap);
 	va_end(ap);
+}
+
+/*
+ * bspc keybind --add "super + Return" "alacritty"
+ * bspc keybind --add "super + q" "bspc node -c"
+ * bspc keybind --remove "super + Return"
+ * bspc keybind --list
+ * bspc keybind --clear
+ * bspc keybind --load /path/to/keybinds
+ */
+void cmd_keybind(char **args, int num, FILE *rsp)
+{
+	if (num < 1) {
+		fail(rsp, "keybind: Missing arguments.\n");
+		return;
+	}
+
+	if (streq("-a", *args) || streq("--add", *args)) {
+		num--, args++;
+		if (num < 2) {
+			fail(rsp, "keybind --add: Need COMBO and COMMAND.\n");
+			return;
+		}
+		uint32_t modifiers, keysym;
+		if (!keybind_parse_combo(args[0], &modifiers, &keysym)) {
+			fail(rsp, "keybind --add: Invalid key combo: '%s'.\n", args[0]);
+			return;
+		}
+		/* Join remaining args as command */
+		char cmd_buf[MAX_COMMAND] = {0};
+		size_t off = 0;
+		for (int i = 1; i < num && off < MAX_COMMAND - 2; i++) {
+			if (i > 1 && off < MAX_COMMAND - 1) cmd_buf[off++] = ' ';
+			size_t rem = MAX_COMMAND - 1 - off;
+			size_t arglen = strlen(args[i]);
+			if (arglen > rem) arglen = rem;
+			memcpy(cmd_buf + off, args[i], arglen);
+			off += arglen;
+		}
+		cmd_buf[off] = '\0';
+		if (!keybind_add(modifiers, keysym, cmd_buf)) {
+			fail(rsp, "keybind --add: Keybind table full.\n");
+		} else {
+			backend_grab_keys();
+		}
+	} else if (streq("-r", *args) || streq("--remove", *args)) {
+		num--, args++;
+		if (num < 1) {
+			fail(rsp, "keybind --remove: Need COMBO.\n");
+			return;
+		}
+		uint32_t modifiers, keysym;
+		if (!keybind_parse_combo(args[0], &modifiers, &keysym)) {
+			fail(rsp, "keybind --remove: Invalid key combo: '%s'.\n", args[0]);
+			return;
+		}
+		/* Find and remove */
+		for (int i = 0; i < keybind_table.count; i++) {
+			if (keybind_table.binds[i].modifiers == modifiers &&
+			    keybind_table.binds[i].keysym == keysym) {
+				/* Shift remaining entries down */
+				memmove(&keybind_table.binds[i], &keybind_table.binds[i+1],
+				        (keybind_table.count - i - 1) * sizeof(keybind_t));
+				keybind_table.count--;
+				backend_grab_keys();
+				return;
+			}
+		}
+		fail(rsp, "keybind --remove: Binding not found.\n");
+	} else if (streq("-l", *args) || streq("--list", *args)) {
+		for (int i = 0; i < keybind_table.count; i++) {
+			keybind_t *kb = &keybind_table.binds[i];
+			char combo[128] = {0};
+			int off = 0;
+			if (kb->modifiers & KBMOD_SUPER) off += snprintf(combo + off, sizeof(combo) - off, "super + ");
+			if (kb->modifiers & KBMOD_ALT)   off += snprintf(combo + off, sizeof(combo) - off, "alt + ");
+			if (kb->modifiers & KBMOD_CTRL)   off += snprintf(combo + off, sizeof(combo) - off, "ctrl + ");
+			if (kb->modifiers & KBMOD_SHIFT)  off += snprintf(combo + off, sizeof(combo) - off, "shift + ");
+			char keysym_name[64];
+			xkb_keysym_get_name(kb->keysym, keysym_name, sizeof(keysym_name));
+			snprintf(combo + off, sizeof(combo) - off, "%s", keysym_name);
+			fprintf(rsp, "%s\n\t%s\n", combo, kb->command);
+		}
+	} else if (streq("-c", *args) || streq("--clear", *args)) {
+		keybind_clear();
+		backend_grab_keys();
+	} else if (streq("--load", *args)) {
+		num--, args++;
+		if (num < 1) {
+			fail(rsp, "keybind --load: Need PATH.\n");
+			return;
+		}
+		if (!keybind_load_config(args[0])) {
+			fail(rsp, "keybind --load: Can't open '%s'.\n", args[0]);
+		} else {
+			backend_grab_keys();
+		}
+	} else {
+		fail(rsp, "keybind: Unknown option: '%s'.\n", *args);
+	}
 }
 

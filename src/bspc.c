@@ -32,6 +32,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <limits.h>
+#include <xcb/xcb.h>
 #include <errno.h>
 #include "helpers.h"
 #include "common.h"
@@ -69,7 +70,25 @@ int main(int argc, char *argv[])
 	} else {
 		char *host = NULL;
 		int dn = 0, sn = 0;
-		if (xcb_parse_display(NULL, &host, &dn, &sn) != 0) {
+		bool found = false;
+
+		/* Try X11 display first */
+		if (getenv("DISPLAY") && xcb_parse_display(NULL, &host, &dn, &sn) != 0) {
+			found = true;
+		}
+
+		/* Fall back to WAYLAND_DISPLAY */
+		if (!found) {
+			char *wl = getenv("WAYLAND_DISPLAY");
+			if (wl) {
+				host = strdup(wl);
+				dn = 0;
+				sn = 0;
+				found = true;
+			}
+		}
+
+		if (found) {
 			int ret = snprintf(sock_address.sun_path, sizeof(sock_address.sun_path),
 			                   SOCKET_PATH_TPL, host, dn, sn);
 			if (ret < 0 || (size_t)ret >= sizeof(sock_address.sun_path)) {

@@ -30,6 +30,9 @@
 #include <string.h>
 #include <unistd.h>
 #include "bspwm.h"
+#ifdef BACKEND_X11
+#include "backend_x11.h"
+#endif
 #include "ewmh.h"
 #include "window.h"
 #include "query.h"
@@ -154,7 +157,7 @@ rule_consequence_t *make_rule_consequence(void)
 	return rc;
 }
 
-pending_rule_t *make_pending_rule(int fd, xcb_window_t win, rule_consequence_t *csq)
+pending_rule_t *make_pending_rule(int fd, bspwm_wid_t win, rule_consequence_t *csq)
 {
 	pending_rule_t *pr = calloc(1, sizeof(pending_rule_t));
 	if (pr == NULL) {
@@ -215,7 +218,7 @@ void remove_pending_rule(pending_rule_t *pr)
 	free(pr);
 }
 
-void postpone_event(pending_rule_t *pr, xcb_generic_event_t *evt)
+void postpone_event(pending_rule_t *pr, void *evt)
 {
 	event_queue_t *eq = make_event_queue(evt);
 	if (pr->event_tail == NULL) {
@@ -227,16 +230,15 @@ void postpone_event(pending_rule_t *pr, xcb_generic_event_t *evt)
 	}
 }
 
-event_queue_t *make_event_queue(xcb_generic_event_t *evt)
+event_queue_t *make_event_queue(void *evt)
 {
     if (!evt) return NULL;
 
     event_queue_t *eq = calloc(1, sizeof(event_queue_t));
     if (!eq) return NULL;
 
-    // deep copy the event
-    size_t evt_size = 32; // XCB events are 32 bytes
-    memcpy(&eq->event, evt, evt_size);
+    /* Copy up to 64 bytes of event data (fits any backend event) */
+    memcpy(eq->data, evt, sizeof(eq->data));
 
     eq->prev = eq->next = NULL;
     return eq;
@@ -266,51 +268,41 @@ event_queue_t *make_event_queue(xcb_generic_event_t *evt)
 		*(csq->layer) = (val); \
 	} while (0)
 
-/*
- * Pipelined window property queries - sends all 6 requests at once,
- * then collects replies. Reduces 6 sequential X11 round-trips to 1 batch.
- * Typical savings: ~3000μs → ~600μs per new window.
- */
-void _apply_window_properties_pipelined(xcb_window_t win, rule_consequence_t *csq)
+void _apply_window_type(bspwm_wid_t win, rule_consequence_t *csq)
 {
-	/* Send all cookies (requests) first - no waiting yet */
-	xcb_get_property_cookie_t type_cookie = xcb_ewmh_get_wm_window_type(ewmh, win);
-	xcb_get_property_cookie_t state_cookie = xcb_ewmh_get_wm_state(ewmh, win);
-	xcb_get_property_cookie_t transient_cookie = xcb_icccm_get_wm_transient_for(dpy, win);
-	xcb_get_property_cookie_t hints_cookie = xcb_icccm_get_wm_normal_hints(dpy, win);
-	xcb_get_property_cookie_t class_cookie = xcb_icccm_get_wm_class(dpy, win);
-	xcb_get_property_cookie_t name_cookie = xcb_icccm_get_wm_name(dpy, win);
+	bspwm_window_type_t type;
+	if (!backend_get_window_type(win, &type))
+		return;
 
-	/* Now collect all replies - X server processes them in parallel */
-
-	/* Window type */
-	xcb_ewmh_get_atoms_reply_t win_type;
-	if (xcb_ewmh_get_wm_window_type_reply(ewmh, type_cookie, &win_type, NULL) == 1) {
-		for (unsigned int i = 0; i < win_type.atoms_len; i++) {
-			xcb_atom_t a = win_type.atoms[i];
-			if (a == ewmh->_NET_WM_WINDOW_TYPE_TOOLBAR ||
-			    a == ewmh->_NET_WM_WINDOW_TYPE_UTILITY) {
-				csq->focus = false;
-			} else if (a == ewmh->_NET_WM_WINDOW_TYPE_DIALOG) {
-				SET_CSQ_STATE(STATE_FLOATING);
-				csq->center = true;
-			} else if (a == ewmh->_NET_WM_WINDOW_TYPE_DOCK ||
-			           a == ewmh->_NET_WM_WINDOW_TYPE_DESKTOP ||
-			           a == ewmh->_NET_WM_WINDOW_TYPE_NOTIFICATION) {
-				csq->manage = false;
-				if (a == ewmh->_NET_WM_WINDOW_TYPE_DESKTOP) {
-					window_lower(win);
-				}
-			}
-		}
-		xcb_ewmh_get_atoms_reply_wipe(&win_type);
+	switch (type) {
+		case BSP_WINDOW_TYPE_TOOLBAR:
+		case BSP_WINDOW_TYPE_UTILITY:
+			csq->focus = false;
+			break;
+		case BSP_WINDOW_TYPE_DIALOG:
+			SET_CSQ_STATE(STATE_FLOATING);
+			csq->center = true;
+			break;
+		case BSP_WINDOW_TYPE_DOCK:
+		case BSP_WINDOW_TYPE_DESKTOP:
+		case BSP_WINDOW_TYPE_NOTIFICATION:
+			csq->manage = false;
+			if (type == BSP_WINDOW_TYPE_DESKTOP)
+				window_lower(win);
+			break;
+		default:
+			break;
 	}
+}
 
-	/* Window state */
-	xcb_ewmh_get_atoms_reply_t win_state;
-	if (xcb_ewmh_get_wm_state_reply(ewmh, state_cookie, &win_state, NULL) == 1) {
-		for (unsigned int i = 0; i < win_state.atoms_len; i++) {
-			xcb_atom_t a = win_state.atoms[i];
+void _apply_window_state(bspwm_wid_t win, rule_consequence_t *csq)
+{
+#ifdef BACKEND_X11
+	/* Query _NET_WM_STATE to set initial fullscreen/above/below/sticky */
+	xcb_ewmh_get_atoms_reply_t wm_state;
+	if (xcb_ewmh_get_wm_state_reply(ewmh, xcb_ewmh_get_wm_state(ewmh, win), &wm_state, NULL) == 1) {
+		for (unsigned int i = 0; i < wm_state.atoms_len; i++) {
+			xcb_atom_t a = wm_state.atoms[i];
 			if (a == ewmh->_NET_WM_STATE_FULLSCREEN) {
 				SET_CSQ_STATE(STATE_FULLSCREEN);
 			} else if (a == ewmh->_NET_WM_STATE_BELOW) {
@@ -321,41 +313,41 @@ void _apply_window_properties_pipelined(xcb_window_t win, rule_consequence_t *cs
 				csq->sticky = true;
 			}
 		}
-		xcb_ewmh_get_atoms_reply_wipe(&win_state);
+		xcb_ewmh_get_atoms_reply_wipe(&wm_state);
 	}
+#else
+	(void)win;
+	(void)csq;
+#endif
+}
 
-	/* Transient */
-	xcb_window_t transient_for = XCB_NONE;
-	xcb_icccm_get_wm_transient_for_reply(dpy, transient_cookie, &transient_for, NULL);
-	if (transient_for != XCB_NONE) {
+void _apply_transient(bspwm_wid_t win, rule_consequence_t *csq)
+{
+	bspwm_wid_t transient_for = BSPWM_WID_NONE;
+	if (backend_get_transient_for(win, &transient_for) && transient_for != BSPWM_WID_NONE) {
 		SET_CSQ_STATE(STATE_FLOATING);
 	}
+}
 
-	/* Size hints */
-	xcb_size_hints_t size_hints;
-	if (xcb_icccm_get_wm_normal_hints_reply(dpy, hints_cookie, &size_hints, NULL) == 1) {
-		if ((size_hints.flags & (XCB_ICCCM_SIZE_HINT_P_MIN_SIZE | XCB_ICCCM_SIZE_HINT_P_MAX_SIZE)) &&
+void _apply_hints(bspwm_wid_t win, rule_consequence_t *csq)
+{
+	bspwm_size_hints_t size_hints;
+	if (backend_get_size_hints(win, &size_hints)) {
+		if ((size_hints.flags & (BSP_SIZE_HINT_P_MIN_SIZE | BSP_SIZE_HINT_P_MAX_SIZE)) &&
 		    size_hints.min_width == size_hints.max_width && size_hints.min_height == size_hints.max_height) {
 			SET_CSQ_STATE(STATE_FLOATING);
 		}
 	}
+}
 
-	/* Class name */
-	xcb_icccm_get_wm_class_reply_t class_reply;
-	if (xcb_icccm_get_wm_class_reply(dpy, class_cookie, &class_reply, NULL) == 1) {
-		snprintf(csq->class_name, sizeof(csq->class_name), "%s", class_reply.class_name);
-		snprintf(csq->instance_name, sizeof(csq->instance_name), "%s", class_reply.instance_name);
-		xcb_icccm_get_wm_class_reply_wipe(&class_reply);
-	}
+void _apply_class(bspwm_wid_t win, rule_consequence_t *csq)
+{
+	backend_get_window_class(win, csq->class_name, csq->instance_name, sizeof(csq->class_name));
+}
 
-	/* Window name */
-	xcb_icccm_get_text_property_reply_t name_reply;
-	if (xcb_icccm_get_wm_name_reply(dpy, name_cookie, &name_reply, NULL) == 1) {
-		int safe_len = (name_reply.name_len > (int)(sizeof(csq->name) - 1)) ?
-		               (int)(sizeof(csq->name) - 1) : name_reply.name_len;
-		snprintf(csq->name, sizeof(csq->name), "%.*s", safe_len, name_reply.name);
-		xcb_icccm_get_text_property_reply_wipe(&name_reply);
-	}
+void _apply_name(bspwm_wid_t win, rule_consequence_t *csq)
+{
+	backend_get_window_name(win, csq->name, sizeof(csq->name));
 }
 
 void parse_keys_values(char *buf, rule_consequence_t *csq)
@@ -389,10 +381,15 @@ void parse_keys_values(char *buf, rule_consequence_t *csq)
 }
 
 
-void apply_rules(xcb_window_t win, rule_consequence_t *csq)
+void apply_rules(bspwm_wid_t win, rule_consequence_t *csq)
 {
-	/* Pipelined: 6 X11 queries batched into 1 round-trip */
-	_apply_window_properties_pipelined(win, csq);
+	/* Query window properties via backend */
+	_apply_window_type(win, csq);
+	_apply_window_state(win, csq);
+	_apply_transient(win, csq);
+	_apply_hints(win, csq);
+	_apply_class(win, csq);
+	_apply_name(win, csq);
 
 	rule_t *rule = rule_head;
 	while (rule != NULL) {
@@ -412,7 +409,7 @@ void apply_rules(xcb_window_t win, rule_consequence_t *csq)
 	}
 }
 
-bool schedule_rules(xcb_window_t win, rule_consequence_t *csq)
+bool schedule_rules(bspwm_wid_t win, rule_consequence_t *csq)
 {
 	if (external_rules_command[0] == '\0') {
 		return false;
@@ -424,8 +421,9 @@ bool schedule_rules(xcb_window_t win, rule_consequence_t *csq)
 	}
 	pid_t pid = fork();
 	if (pid == 0) {
-		if (dpy != NULL) {
-			close(xcb_get_file_descriptor(dpy));
+		int dpy_fd = backend_get_fd();
+		if (dpy_fd >= 0) {
+			close(dpy_fd);
 		}
 		dup2(fds[1], 1);
 		close(fds[0]);
@@ -499,7 +497,7 @@ void parse_key_value(char *key, char *value, rule_consequence_t *csq)
 		}
 	} else if (streq("rectangle", key)) {
 		if (csq->rect == NULL) {
-			csq->rect = calloc(1, sizeof(xcb_rectangle_t));
+			csq->rect = calloc(1, sizeof(bspwm_rect_t));
 		}
 		if (!parse_rectangle(value, csq->rect)) {
 			free(csq->rect);

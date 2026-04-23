@@ -35,27 +35,19 @@
 
 #define STATE_PATH_TPL           "/tmp/bspwm%s_%i_%i-state"
 
-#define ROOT_EVENT_MASK     (XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_FOCUS_CHANGE)
-#define CLIENT_EVENT_MASK   (XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_EVENT_MASK_FOCUS_CHANGE)
 #define BSPWM_CLASS_NAME    "Bspwm"
-#define META_WINDOW_IC      "wm\0" BSPWM_CLASS_NAME
-#define ROOT_WINDOW_IC      "root\0" BSPWM_CLASS_NAME
 #define PRESEL_FEEDBACK_I   "presel_feedback"
-#define PRESEL_FEEDBACK_IC  PRESEL_FEEDBACK_I "\0" BSPWM_CLASS_NAME
 #define MOTION_RECORDER_I   "motion_recorder"
-#define MOTION_RECORDER_IC  MOTION_RECORDER_I "\0" BSPWM_CLASS_NAME
 
 typedef struct {
-	xcb_window_t id;
+	bspwm_wid_t id;
 	uint16_t sequence;
 	bool enabled;
 } motion_recorder_t;
 
-extern xcb_connection_t *dpy;
 extern int default_screen, screen_width, screen_height;
 extern uint32_t clients_count;
-extern xcb_screen_t *screen;
-extern xcb_window_t root;
+extern bspwm_wid_t root;
 extern char config_path[MAXLEN];
 
 extern monitor_t *mon;
@@ -74,11 +66,8 @@ extern subscriber_list_t *subscribe_tail;
 extern pending_rule_t *pending_rule_head;
 extern pending_rule_t *pending_rule_tail;
 
-extern xcb_window_t meta_window;
+extern bspwm_wid_t meta_window;
 extern motion_recorder_t motion_recorder;
-extern xcb_atom_t WM_STATE;
-extern xcb_atom_t WM_TAKE_FOCUS;
-extern xcb_atom_t WM_DELETE_WINDOW;
 extern int exit_status;
 extern int epoll_fd;
 
@@ -92,10 +81,7 @@ extern bool randr;
 
 void init(void);
 void setup(void);
-void register_events(void);
 void cleanup(void);
-bool check_connection (xcb_connection_t *dpy);
 void sig_handler(int sig);
-uint32_t get_color_pixel(const char *color);
 
 #endif

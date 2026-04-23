@@ -44,7 +44,7 @@
  * Returns bitmask: bit 0 = inside rect[0], bit 1 = inside rect[1]
  */
 #ifdef HAVE_SSE2
-int is_inside_batch2(xcb_point_t p, const xcb_rectangle_t rects[2])
+int is_inside_batch2(bspwm_point_t p, const bspwm_rect_t rects[2])
 {
 	/* Load point as {px, py, px, py} */
 	__m128i point = _mm_set_epi32(p.y, p.x, p.y, p.x);
@@ -73,19 +73,19 @@ int is_inside_batch2(xcb_point_t p, const xcb_rectangle_t rects[2])
 }
 #endif
 
-static inline bool valid_rect(xcb_rectangle_t r)
+static inline bool valid_rect(bspwm_rect_t r)
 {
 	return r.width > 0 && r.height > 0 &&
 	       r.x <= INT16_MAX - r.width &&
 	       r.y <= INT16_MAX - r.height;
 }
 
-static inline xcb_point_t rect_max(xcb_rectangle_t r)
+static inline bspwm_point_t rect_max(bspwm_rect_t r)
 {
-	return (xcb_point_t){r.x + r.width - 1, r.y + r.height - 1};
+	return (bspwm_point_t){r.x + r.width - 1, r.y + r.height - 1};
 }
 
-bool is_inside(xcb_point_t p, xcb_rectangle_t r)
+bool is_inside(bspwm_point_t p, bspwm_rect_t r)
 {
 	if (!valid_rect(r))
 		return false;
@@ -93,17 +93,17 @@ bool is_inside(xcb_point_t p, xcb_rectangle_t r)
 	       p.y >= r.y && p.y < r.y + r.height;
 }
 
-bool contains(xcb_rectangle_t a, xcb_rectangle_t b)
+bool contains(bspwm_rect_t a, bspwm_rect_t b)
 {
 	if (!valid_rect(a) || !valid_rect(b))
 		return false;
-	xcb_point_t b_max = rect_max(b);
+	bspwm_point_t b_max = rect_max(b);
 	return a.x <= b.x && a.y <= b.y &&
 	       a.x + a.width >= b_max.x + 1 &&
 	       a.y + a.height >= b_max.y + 1;
 }
 
-unsigned int area(xcb_rectangle_t r)
+unsigned int area(bspwm_rect_t r)
 {
 	if (!valid_rect(r))
 		return 0;
@@ -112,13 +112,13 @@ unsigned int area(xcb_rectangle_t r)
 	return r.width * r.height;
 }
 
-uint32_t boundary_distance(xcb_rectangle_t r1, xcb_rectangle_t r2, direction_t dir)
+uint32_t boundary_distance(bspwm_rect_t r1, bspwm_rect_t r2, direction_t dir)
 {
 	if (!valid_rect(r1) || !valid_rect(r2))
 		return UINT32_MAX;
 
-	xcb_point_t r1_max = rect_max(r1);
-	xcb_point_t r2_max = rect_max(r2);
+	bspwm_point_t r1_max = rect_max(r1);
+	bspwm_point_t r2_max = rect_max(r2);
 
 	switch (dir) {
 		case DIR_NORTH:
@@ -134,13 +134,13 @@ uint32_t boundary_distance(xcb_rectangle_t r1, xcb_rectangle_t r2, direction_t d
 	}
 }
 
-bool on_dir_side(xcb_rectangle_t r1, xcb_rectangle_t r2, direction_t dir)
+bool on_dir_side(bspwm_rect_t r1, bspwm_rect_t r2, direction_t dir)
 {
 	if (!valid_rect(r1) || !valid_rect(r2))
 		return false;
 
-	xcb_point_t r1_max = rect_max(r1);
-	xcb_point_t r2_max = rect_max(r2);
+	bspwm_point_t r1_max = rect_max(r1);
+	bspwm_point_t r2_max = rect_max(r2);
 
 	/* Check if r2 is on the correct side */
 	switch (directional_focus_tightness) {
@@ -198,16 +198,16 @@ bool on_dir_side(xcb_rectangle_t r1, xcb_rectangle_t r2, direction_t dir)
 }
 
 /* SIMD-style rect comparison - single 64-bit compare instead of 4 branches */
-bool rect_eq(xcb_rectangle_t a, xcb_rectangle_t b)
+bool rect_eq(bspwm_rect_t a, bspwm_rect_t b)
 {
-	/* xcb_rectangle_t is exactly 8 bytes - compare as uint64_t */
+	/* bspwm_rect_t is exactly 8 bytes - compare as uint64_t */
 	uint64_t va, vb;
 	memcpy(&va, &a, sizeof(va));
 	memcpy(&vb, &b, sizeof(vb));
 	return va == vb;
 }
 
-int rect_cmp(xcb_rectangle_t r1, xcb_rectangle_t r2)
+int rect_cmp(bspwm_rect_t r1, bspwm_rect_t r2)
 {
 	if (!valid_rect(r1) || !valid_rect(r2))
 		return 0;

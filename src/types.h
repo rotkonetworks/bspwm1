@@ -25,10 +25,7 @@
 #ifndef BSPWM_TYPES_H
 #define BSPWM_TYPES_H
 #include <stdbool.h>
-#include <xcb/xcb.h>
-#include <xcb/xcb_icccm.h>
-#include <xcb/randr.h>
-#include <xcb/xcb_event.h>
+#include "backend.h"
 #include "helpers.h"
 
 #define MISSING_VALUE        "N/A"
@@ -230,12 +227,8 @@ typedef struct {
 	option_bool_t focused;
 } monitor_select_t;
 
-typedef struct icccm_props_t icccm_props_t;
-struct icccm_props_t {
-	bool take_focus;
-	bool input_hint;
-	bool delete_window;
-};
+/* icccm_props_t is now an alias for the backend-portable type */
+typedef bspwm_icccm_props_t icccm_props_t;
 
 typedef struct {
 	/* HOT fields - first cache line (64 bytes) - accessed on every operation */
@@ -244,8 +237,8 @@ typedef struct {
 	stack_layer_t layer;               /* 1 byte */
 	stack_layer_t last_layer;          /* 1 byte */
 	unsigned int border_width;         /* 4 bytes - offset 4 */
-	xcb_rectangle_t floating_rectangle;/* 8 bytes - offset 8 */
-	xcb_rectangle_t tiled_rectangle;   /* 8 bytes - offset 16 */
+	bspwm_rect_t floating_rectangle;   /* 8 bytes - offset 8 */
+	bspwm_rect_t tiled_rectangle;      /* 8 bytes - offset 16 */
 	bool urgent;                       /* 1 byte - offset 24 */
 	bool shown;                        /* 1 byte - offset 25 */
 	honor_size_hints_mode_t honor_size_hints; /* 1 byte - offset 26 */
@@ -255,7 +248,7 @@ typedef struct {
 	/* ~33 bytes hot data in first cache line */
 
 	/* WARM fields - size hints used during resize */
-	xcb_size_hints_t size_hints;
+	bspwm_size_hints_t size_hints;
 
 	/* COLD fields - only accessed during window creation/rule matching */
 	char class_name[MAX_CLASS_NAME_LEN];
@@ -267,8 +260,8 @@ typedef struct {
 #define GEOMETRY_CACHE_TTL_MS 100
 
 typedef struct {
-	xcb_window_t win;
-	xcb_rectangle_t geometry;
+	bspwm_wid_t win;
+	bspwm_rect_t geometry;
 	uint64_t timestamp;
 	bool valid;
 } geometry_cache_entry_t;
@@ -277,7 +270,7 @@ typedef struct presel_t presel_t;
 struct presel_t {
 	double split_ratio;
 	direction_t split_dir;
-	xcb_window_t feedback;
+	bspwm_wid_t feedback;
 };
 
 typedef struct constraints_t constraints_t;
@@ -296,7 +289,7 @@ struct node_t {
 	split_type_t split_type;
 	double split_ratio;
 	presel_t *presel;
-	xcb_rectangle_t rectangle;
+	bspwm_rect_t rectangle;
 	constraints_t constraints;
 	bool vacant;
 	bool hidden;
@@ -336,14 +329,14 @@ typedef struct monitor_t monitor_t;
 struct monitor_t {
 	char name[SMALEN];
 	uint32_t id;
-	xcb_randr_output_t randr_id;
-	xcb_window_t root;
+	bspwm_output_id_t output_id;
+	bspwm_wid_t root;
 	bool wired;
 	padding_t padding;
 	unsigned int sticky_count;
 	int window_gap;
 	unsigned int border_width;
-	xcb_rectangle_t rectangle;
+	bspwm_rect_t rectangle;
 	desktop_t *desk;
 	desktop_t *desk_head;
 	desktop_t *desk_tail;
@@ -372,9 +365,12 @@ struct stacking_list_t {
 	stacking_list_t *next;
 };
 
+/* Deferred event for pending rule processing.
+ * On X11 this holds the raw xcb_generic_event_t; on wlroots
+ * the backend stores an opaque copy of the event data. */
 typedef struct event_queue_t event_queue_t;
 struct event_queue_t {
-	xcb_generic_event_t event;
+	uint8_t data[64]; /* large enough for any backend event */
 	event_queue_t *prev;
 	event_queue_t *next;
 };
@@ -422,13 +418,13 @@ typedef struct {
 	bool manage;
 	bool focus;
 	bool border;
-	xcb_rectangle_t *rect;
+	bspwm_rect_t *rect;
 } rule_consequence_t;
 
 typedef struct pending_rule_t pending_rule_t;
 struct pending_rule_t {
 	int fd;
-	xcb_window_t win;
+	bspwm_wid_t win;
 	rule_consequence_t *csq;
 	event_queue_t *event_head;
 	event_queue_t *event_tail;

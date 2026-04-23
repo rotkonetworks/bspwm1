@@ -184,7 +184,9 @@ char *mktempfifo(const char *template)
 		return NULL;
 	}
 
-	snprintf(fifo_path, path_len, "%s/%s", runtime_dir, template);
+	memcpy(fifo_path, runtime_dir, runtime_len);
+	fifo_path[runtime_len] = '/';
+	memcpy(fifo_path + runtime_len + 1, template, template_len + 1);
 
 	if ((tempfd = mkstemp(fifo_path)) == -1) {
 		free(fifo_path);

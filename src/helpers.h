@@ -25,7 +25,6 @@
 #ifndef BSPWM_HELPERS_H
 #define BSPWM_HELPERS_H
 
-#include <xcb/xcb.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,9 +60,12 @@
 #define LAYER_STR(A)      ((A) == LAYER_BELOW ? "below" : ((A) == LAYER_NORMAL ? "normal" : "above"))
 #define HSH_MODE_STR(A)   ((A) == HONOR_SIZE_HINTS_TILED ? "tiled" : ((A) == HONOR_SIZE_HINTS_FLOATING ? "floating" : BOOL_STR(A)))
 
+/* X11-specific config window masks — only used in backend_x11.c */
+#ifdef BACKEND_X11
 #define XCB_CONFIG_WINDOW_X_Y               (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y)
 #define XCB_CONFIG_WINDOW_WIDTH_HEIGHT      (XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT)
 #define XCB_CONFIG_WINDOW_X_Y_WIDTH_HEIGHT  (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT)
+#endif
 
 #define SHOULD_HONOR_SIZE_HINTS(hsh, state) \
 	((hsh) && \

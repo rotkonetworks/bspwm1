@@ -61,7 +61,7 @@ void arrange(monitor_t *m, desktop_t *d)
 		return;
 	}
 
-	xcb_rectangle_t rect = m->rectangle;
+	bspwm_rect_t rect = m->rectangle;
 
 	rect.x = SAFE_ADD(rect.x, SAFE_ADD(m->padding.left, d->padding.left, UINT16_MAX), UINT16_MAX);
 	rect.y = SAFE_ADD(rect.y, SAFE_ADD(m->padding.top, d->padding.top, UINT16_MAX), UINT16_MAX);
@@ -87,7 +87,7 @@ void arrange(monitor_t *m, desktop_t *d)
 	apply_layout(m, d, d->root, rect, rect);
 }
 
-void apply_layout(monitor_t *m, desktop_t *d, node_t *n, xcb_rectangle_t rect, xcb_rectangle_t root_rect)
+void apply_layout(monitor_t *m, desktop_t *d, node_t *n, bspwm_rect_t rect, bspwm_rect_t root_rect)
 {
 	if (!n || !m || !d) {
 		return;
@@ -115,8 +115,8 @@ void apply_layout(monitor_t *m, desktop_t *d, node_t *n, xcb_rectangle_t rect, x
 			bw = n->client->border_width;
 		}
 
-		xcb_rectangle_t r;
-		xcb_rectangle_t cr = get_window_rectangle(n);
+		bspwm_rect_t r;
+		bspwm_rect_t cr = get_window_rectangle(n);
 		client_state_t s = n->client->state;
 
 		if (s == STATE_TILED || s == STATE_PSEUDO_TILED) {
@@ -132,7 +132,7 @@ void apply_layout(monitor_t *m, desktop_t *d, node_t *n, xcb_rectangle_t rect, x
 			r.height = (bleed < (int)r.height ? r.height - bleed : 1);
 
 			if (s == STATE_PSEUDO_TILED) {
-				xcb_rectangle_t f = n->client->floating_rectangle;
+				bspwm_rect_t f = n->client->floating_rectangle;
 				r.width = MIN(r.width, f.width);
 				r.height = MIN(r.height, f.height);
 				if (center_pseudo_tiled) {
@@ -164,8 +164,8 @@ void apply_layout(monitor_t *m, desktop_t *d, node_t *n, xcb_rectangle_t rect, x
 			return;
 		}
 
-		xcb_rectangle_t first_rect;
-		xcb_rectangle_t second_rect;
+		bspwm_rect_t first_rect;
+		bspwm_rect_t second_rect;
 
 		if (d->layout == LAYOUT_MONOCLE || n->first_child->vacant || n->second_child->vacant) {
 			first_rect = second_rect = rect;
@@ -186,8 +186,8 @@ void apply_layout(monitor_t *m, desktop_t *d, node_t *n, xcb_rectangle_t rect, x
 					}
 				}
 
-				first_rect = (xcb_rectangle_t){rect.x, rect.y, fence, rect.height};
-				second_rect = (xcb_rectangle_t){rect.x + fence, rect.y, rect.width - fence, rect.height};
+				first_rect = (bspwm_rect_t){rect.x, rect.y, fence, rect.height};
+				second_rect = (bspwm_rect_t){rect.x + fence, rect.y, rect.width - fence, rect.height};
 			} else {
 				fence = (unsigned int)(rect.height * n->split_ratio);
 				uint16_t min_sum = SAFE_ADD(n->first_child->constraints.min_height,
@@ -203,8 +203,8 @@ void apply_layout(monitor_t *m, desktop_t *d, node_t *n, xcb_rectangle_t rect, x
 					}
 				}
 
-				first_rect = (xcb_rectangle_t){rect.x, rect.y, rect.width, fence};
-				second_rect = (xcb_rectangle_t){rect.x, rect.y + fence, rect.width, rect.height - fence};
+				first_rect = (bspwm_rect_t){rect.x, rect.y, rect.width, fence};
+				second_rect = (bspwm_rect_t){rect.x, rect.y + fence, rect.width, rect.height - fence};
 			}
 		}
 
@@ -221,7 +221,7 @@ presel_t *make_presel(void)
 	}
 	p->split_dir = DIR_EAST;
 	p->split_ratio = split_ratio;
-	p->feedback = XCB_NONE;
+	p->feedback = BSPWM_WID_NONE;
 	return p;
 }
 
@@ -289,8 +289,8 @@ void cancel_presel(monitor_t *m, desktop_t *d, node_t *n)
 		return;
 	}
 
-	if (n->presel->feedback != XCB_NONE) {
-		xcb_destroy_window(dpy, n->presel->feedback);
+	if (n->presel->feedback != BSPWM_WID_NONE) {
+		backend_destroy_window(n->presel->feedback);
 	}
 
 	free(n->presel);
@@ -346,35 +346,28 @@ node_t *find_public(desktop_t *d)
 	return b_automatic ? b_automatic : b_manual;
 }
 
-bool window_ignores_tile_limits(xcb_window_t win)
+bool window_ignores_tile_limits(bspwm_wid_t win)
 {
 	if (!win) {
 		return false;
 	}
 
-	xcb_icccm_get_wm_class_reply_t reply;
-	bool result = false;
+	char class_name[MAX_CLASS_NAME_LEN] = {0};
+	char instance_name[MAX_INSTANCE_NAME_LEN] = {0};
 
-	if (xcb_icccm_get_wm_class_reply(dpy, xcb_icccm_get_wm_class(dpy, win), &reply, NULL) != 1) {
+	if (!backend_get_window_class(win, class_name, instance_name, sizeof(class_name))) {
 		return false;
 	}
 
-	if (!reply.class_name) {
-		goto cleanup;
-	}
-
 	for (rule_t *r = rule_head; r != NULL; r = r->next) {
-		if (streq(r->class_name, MATCH_ANY) || streq(reply.class_name, r->class_name)) {
+		if (streq(r->class_name, MATCH_ANY) || streq(class_name, r->class_name)) {
 			if (strstr(r->effect, "ignore_tile_limits=on") != NULL) {
-				result = true;
-				break;
+				return true;
 			}
 		}
 	}
 
-cleanup:
-	xcb_icccm_get_wm_class_reply_wipe(&reply);
-	return result;
+	return false;
 }
 
 static void count_tiled_nodes_iterative(node_t *root, int *count)
@@ -474,7 +467,7 @@ insert_node:
 		free(f);
 		f = NULL;
 	} else {
-		node_t *c = make_node(XCB_NONE);
+		node_t *c = make_node(BSPWM_WID_NONE);
 		if (!c) {
 			return NULL;
 		}
@@ -487,7 +480,7 @@ insert_node:
 				p = f->parent;
 			}
 			if (!f->presel && (f->private || private_count(f->parent) > 0)) {
-				xcb_rectangle_t rect = get_rectangle(m, d, f);
+				bspwm_rect_t rect = get_rectangle(m, d, f);
 				presel_dir(m, d, f, (rect.width >= rect.height ? DIR_EAST : DIR_SOUTH));
 			}
 		}
@@ -615,7 +608,7 @@ void insert_receptacle(monitor_t *m, desktop_t *d, node_t *n)
 		return;
 	}
 
-	node_t *r = make_node(XCB_NONE);
+	node_t *r = make_node(BSPWM_WID_NONE);
 	if (!r) {
 		return;
 	}
@@ -844,7 +837,7 @@ bool focus_node(monitor_t *m, desktop_t *d, node_t *n)
 	stack(d, n, true);
 
 	if (pointer_follows_focus) {
-		xcb_rectangle_t rect = get_rectangle(m, d, n);
+		bspwm_rect_t rect = get_rectangle(m, d, n);
 		if (rect.width > 0 && rect.height > 0) {
 			center_pointer(rect);
 		}
@@ -915,8 +908,8 @@ void show_node(desktop_t *d, node_t *n)
 
 node_t *make_node(uint32_t id)
 {
-	if (id == XCB_NONE) {
-		id = xcb_generate_id(dpy);
+	if (id == BSPWM_WID_NONE) {
+		id = ++clients_count;
 	}
 	node_t *n = calloc(1, sizeof(node_t));
 	if (!n) {
@@ -967,59 +960,14 @@ void initialize_client(node_t *n)
 		return;
 	}
 
-	xcb_window_t win = n->id;
+	bspwm_wid_t win = n->id;
 	client_t *c = n->client;
 
-	/* Send all cookies first - no waiting yet */
-	xcb_get_property_cookie_t protos_cookie = xcb_icccm_get_wm_protocols(dpy, win, ewmh->WM_PROTOCOLS);
-	xcb_get_property_cookie_t state_cookie = xcb_ewmh_get_wm_state(ewmh, win);
-	xcb_get_property_cookie_t hints_cookie = xcb_icccm_get_wm_hints(dpy, win);
-	xcb_get_property_cookie_t size_cookie = xcb_icccm_get_wm_normal_hints(dpy, win);
+	/* Query ICCCM properties via backend */
+	backend_get_icccm_props(win, &c->icccm_props);
 
-	/* Now collect all replies */
-	xcb_icccm_get_wm_protocols_reply_t protos;
-	if (xcb_icccm_get_wm_protocols_reply(dpy, protos_cookie, &protos, NULL) == 1) {
-		for (uint32_t i = 0; i < protos.atoms_len && i < 32; i++) {
-			if (protos.atoms[i] == WM_TAKE_FOCUS) {
-				c->icccm_props.take_focus = true;
-			} else if (protos.atoms[i] == WM_DELETE_WINDOW) {
-				c->icccm_props.delete_window = true;
-			}
-		}
-		xcb_icccm_get_wm_protocols_reply_wipe(&protos);
-	}
-
-	xcb_ewmh_get_atoms_reply_t wm_state;
-	if (xcb_ewmh_get_wm_state_reply(ewmh, state_cookie, &wm_state, NULL) == 1) {
-		for (unsigned int i = 0; i < wm_state.atoms_len && i < MAX_WM_STATES; i++) {
-#define HANDLE_WM_STATE(s) \
-			if (wm_state.atoms[i] == ewmh->_NET_WM_STATE_##s) { \
-				c->wm_flags |= WM_FLAG_##s; continue; \
-			}
-			HANDLE_WM_STATE(MODAL)
-			HANDLE_WM_STATE(STICKY)
-			HANDLE_WM_STATE(MAXIMIZED_VERT)
-			HANDLE_WM_STATE(MAXIMIZED_HORZ)
-			HANDLE_WM_STATE(SHADED)
-			HANDLE_WM_STATE(SKIP_TASKBAR)
-			HANDLE_WM_STATE(SKIP_PAGER)
-			HANDLE_WM_STATE(HIDDEN)
-			HANDLE_WM_STATE(FULLSCREEN)
-			HANDLE_WM_STATE(ABOVE)
-			HANDLE_WM_STATE(BELOW)
-			HANDLE_WM_STATE(DEMANDS_ATTENTION)
-#undef HANDLE_WM_STATE
-		}
-		xcb_ewmh_get_atoms_reply_wipe(&wm_state);
-	}
-
-	xcb_icccm_wm_hints_t hints;
-	if (xcb_icccm_get_wm_hints_reply(dpy, hints_cookie, &hints, NULL) == 1 &&
-	    (hints.flags & XCB_ICCCM_WM_HINT_INPUT)) {
-		c->icccm_props.input_hint = hints.input;
-	}
-
-	xcb_icccm_get_wm_normal_hints_reply(dpy, size_cookie, &c->size_hints, NULL);
+	/* Query size hints via backend */
+	backend_get_size_hints(win, &c->size_hints);
 }
 
 bool is_focusable(node_t *n)
@@ -1423,7 +1371,7 @@ void find_nearest_neighbor(coordinates_t *ref, coordinates_t *dst, direction_t d
 		return;
 	}
 
-	xcb_rectangle_t rect = get_rectangle(ref->monitor, ref->desktop, ref->node);
+	bspwm_rect_t rect = get_rectangle(ref->monitor, ref->desktop, ref->node);
 	uint32_t md = UINT32_MAX, mr = UINT32_MAX;
 
 	for (monitor_t *m = mon_head; m; m = m->next) {
@@ -1434,7 +1382,7 @@ void find_nearest_neighbor(coordinates_t *ref, coordinates_t *dst, direction_t d
 
 		for (node_t *f = first_extrema(d->root); f; f = next_leaf(f, d->root)) {
 			coordinates_t loc = {m, d, f};
-			xcb_rectangle_t r = get_rectangle(m, d, f);
+			bspwm_rect_t r = get_rectangle(m, d, f);
 
 			if (f == ref->node || !f->client || f->hidden ||
 			    is_descendant(f, ref->node) || !node_matches(&loc, ref, sel) ||
@@ -1609,7 +1557,7 @@ int balance_tree(node_t *n)
 	return balance_tree_bounded(n, 0);
 }
 
-static void adjust_ratios_bounded(node_t *n, xcb_rectangle_t rect, int depth)
+static void adjust_ratios_bounded(node_t *n, bspwm_rect_t rect, int depth)
 {
 	if (!n || n->vacant || depth > MAX_TREE_DEPTH) {
 		return;
@@ -1645,24 +1593,24 @@ static void adjust_ratios_bounded(node_t *n, xcb_rectangle_t rect, int depth)
 		return;
 	}
 
-	xcb_rectangle_t first_rect, second_rect;
+	bspwm_rect_t first_rect, second_rect;
 	unsigned int fence;
 
 	if (n->split_type == TYPE_VERTICAL) {
 		fence = (unsigned int)(rect.width * n->split_ratio);
-		first_rect = (xcb_rectangle_t){rect.x, rect.y, fence, rect.height};
-		second_rect = (xcb_rectangle_t){rect.x + fence, rect.y, rect.width - fence, rect.height};
+		first_rect = (bspwm_rect_t){rect.x, rect.y, fence, rect.height};
+		second_rect = (bspwm_rect_t){rect.x + fence, rect.y, rect.width - fence, rect.height};
 	} else {
 		fence = (unsigned int)(rect.height * n->split_ratio);
-		first_rect = (xcb_rectangle_t){rect.x, rect.y, rect.width, fence};
-		second_rect = (xcb_rectangle_t){rect.x, rect.y + fence, rect.width, rect.height - fence};
+		first_rect = (bspwm_rect_t){rect.x, rect.y, rect.width, fence};
+		second_rect = (bspwm_rect_t){rect.x, rect.y + fence, rect.width, rect.height - fence};
 	}
 
 	adjust_ratios_bounded(n->first_child, first_rect, depth + 1);
 	adjust_ratios_bounded(n->second_child, second_rect, depth + 1);
 }
 
-void adjust_ratios(node_t *n, xcb_rectangle_t rect)
+void adjust_ratios(node_t *n, bspwm_rect_t rect)
 {
 	adjust_ratios_bounded(n, rect, 0);
 }
@@ -1743,9 +1691,9 @@ static void close_node_bounded(node_t *n, int depth)
 
 	if (n->client) {
 		if (n->client->icccm_props.delete_window) {
-			send_client_message(n->id, ewmh->WM_PROTOCOLS, WM_DELETE_WINDOW);
+			backend_request_close(n->id);
 		} else {
-			xcb_kill_client(dpy, n->id);
+			backend_close_window(n->id);
 		}
 	} else {
 		close_node_bounded(n->first_child, depth + 1);
@@ -1771,7 +1719,7 @@ void kill_node(monitor_t *m, desktop_t *d, node_t *n)
 	} else {
 		for (node_t *f = first_extrema(n); f; f = next_leaf(f, n)) {
 			if (f->client) {
-				xcb_kill_client(dpy, f->id);
+				backend_close_window(f->id);
 			}
 		}
 	}
@@ -1897,13 +1845,13 @@ bool swap_nodes(monitor_t *m1, desktop_t *d1, node_t *n1, monitor_t *m2, desktop
 	uint32_t last_d1_focus_id = last_d1_focus ? last_d1_focus->id : 0;
 	uint32_t last_d2_focus_id = last_d2_focus ? last_d2_focus->id : 0;
 
-	if (n1->presel && n1->presel->feedback != XCB_NONE) {
-		xcb_destroy_window(dpy, n1->presel->feedback);
-		n1->presel->feedback = XCB_NONE;
+	if (n1->presel && n1->presel->feedback != BSPWM_WID_NONE) {
+		backend_destroy_window(n1->presel->feedback);
+		n1->presel->feedback = BSPWM_WID_NONE;
 	}
-	if (n2->presel && n2->presel->feedback != XCB_NONE) {
-		xcb_destroy_window(dpy, n2->presel->feedback);
-		n2->presel->feedback = XCB_NONE;
+	if (n2->presel && n2->presel->feedback != BSPWM_WID_NONE) {
+		backend_destroy_window(n2->presel->feedback);
+		n2->presel->feedback = BSPWM_WID_NONE;
 	}
 
 	if (pn1) {
@@ -2052,7 +2000,7 @@ bool swap_nodes(monitor_t *m1, desktop_t *d1, node_t *n1, monitor_t *m2, desktop
 	} else {
 		if (pointer_follows_focus && (n1_held_focus || n2_held_focus)) {
 			if (d1->focus) {
-				xcb_rectangle_t rect = get_rectangle(m1, d1, d1->focus);
+				bspwm_rect_t rect = get_rectangle(m1, d1, d1->focus);
 				if (rect.width > 0 && rect.height > 0 &&
 				    rect.x < m1->rectangle.width &&
 				    rect.y < m1->rectangle.height) {
@@ -2795,10 +2743,10 @@ void set_urgent(monitor_t *m, desktop_t *d, node_t *n, bool value)
 	put_status(SBSC_MASK_REPORT);
 }
 
-xcb_rectangle_t get_rectangle(monitor_t *m, desktop_t *d, node_t *n)
+bspwm_rect_t get_rectangle(monitor_t *m, desktop_t *d, node_t *n)
 {
 	if (!n) {
-		return m ? m->rectangle : (xcb_rectangle_t){0, 0, 0, 0};
+		return m ? m->rectangle : (bspwm_rect_t){0, 0, 0, 0};
 	}
 
 	client_t *c = n->client;
@@ -2810,7 +2758,7 @@ xcb_rectangle_t get_rectangle(monitor_t *m, desktop_t *d, node_t *n)
 		}
 	} else {
 		int wg = (!d ? 0 : (gapless_monocle && d->layout == LAYOUT_MONOCLE ? 0 : d->window_gap));
-		xcb_rectangle_t rect = n->rectangle;
+		bspwm_rect_t rect = n->rectangle;
 		rect.width = SAFE_SUB(rect.width, wg);
 		rect.height = SAFE_SUB(rect.height, wg);
 		return rect;
@@ -2819,14 +2767,13 @@ xcb_rectangle_t get_rectangle(monitor_t *m, desktop_t *d, node_t *n)
 
 void listen_enter_notify(node_t *n, bool enable)
 {
-	uint32_t mask = CLIENT_EVENT_MASK | (enable ? XCB_EVENT_MASK_ENTER_WINDOW : 0);
 	for (node_t *f = first_extrema(n); f; f = next_leaf(f, n)) {
 		if (!f->client) {
 			continue;
 		}
-		xcb_change_window_attributes(dpy, f->id, XCB_CW_EVENT_MASK, &mask);
+		backend_window_listen_enter(f->id, enable);
 		if (f->presel) {
-			xcb_change_window_attributes(dpy, f->presel->feedback, XCB_CW_EVENT_MASK, &mask);
+			backend_window_listen_enter(f->presel->feedback, enable);
 		}
 	}
 }
@@ -2836,7 +2783,7 @@ static void regenerate_ids_in_bounded(node_t *n, int depth)
 	if (!n || n->client || depth > MAX_TREE_DEPTH) {
 		return;
 	}
-	n->id = xcb_generate_id(dpy);
+	n->id = ++clients_count;
 	regenerate_ids_in_bounded(n->first_child, depth + 1);
 	regenerate_ids_in_bounded(n->second_child, depth + 1);
 }

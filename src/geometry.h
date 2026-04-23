@@ -25,20 +25,19 @@
 #ifndef BSPWM_GEOMETRY_H
 #define BSPWM_GEOMETRY_H
 
-#include <stdbool.h>
-#include <xcb/xcb.h>
+#include "types.h"
 
-bool is_inside(xcb_point_t p, xcb_rectangle_t r);
-bool contains(xcb_rectangle_t a, xcb_rectangle_t b);
-unsigned int area(xcb_rectangle_t r);
-uint32_t boundary_distance(xcb_rectangle_t r1, xcb_rectangle_t r2, direction_t dir);
-bool on_dir_side(xcb_rectangle_t r1, xcb_rectangle_t r2, direction_t dir);
-bool rect_eq(xcb_rectangle_t a, xcb_rectangle_t b);
-int rect_cmp(xcb_rectangle_t r1, xcb_rectangle_t r2);
+bool is_inside(bspwm_point_t p, bspwm_rect_t r);
+bool contains(bspwm_rect_t a, bspwm_rect_t b);
+unsigned int area(bspwm_rect_t r);
+uint32_t boundary_distance(bspwm_rect_t r1, bspwm_rect_t r2, direction_t dir);
+bool on_dir_side(bspwm_rect_t r1, bspwm_rect_t r2, direction_t dir);
+bool rect_eq(bspwm_rect_t a, bspwm_rect_t b);
+int rect_cmp(bspwm_rect_t r1, bspwm_rect_t r2);
 
 /* SIMD batch operations - check 2 rectangles at once */
 #ifdef __SSE2__
-int is_inside_batch2(xcb_point_t p, const xcb_rectangle_t rects[2]);
+int is_inside_batch2(bspwm_point_t p, const bspwm_rect_t rects[2]);
 #endif
 
 #endif
