@@ -262,6 +262,15 @@ bool grab_pointer(pointer_action_t pac)
 	}
 	free(reply);
 
+	/* Windows-like behavior: drag/resize raises the window to the top.
+	 * Route through bspwm's own focus/stack machinery so the internal
+	 * stacking list stays in sync with the X stack. */
+	if (loc.node != mon->desk->focus) {
+		focus_node(loc.monitor, loc.desktop, loc.node);
+	} else {
+		stack(loc.desktop, loc.node, true);
+	}
+
 	if (pac == ACTION_MOVE) {
 		put_status(SBSC_MASK_POINTER_ACTION, "pointer_action 0x%08X 0x%08X 0x%08X move begin\n",
 		          loc.monitor->id, loc.desktop->id, loc.node->id);
