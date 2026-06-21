@@ -323,6 +323,7 @@ struct desktop_t {
 	unsigned int urgent_count;
 	bool tile_limit_enabled;
 	int max_tiles_per_desktop;
+	unsigned int cascade_index;
 };
 
 typedef struct monitor_t monitor_t;

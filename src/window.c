@@ -167,6 +167,14 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 
 	if (csq->center) {
 		window_center(m, c);
+		if (cascade_offset > 0) {
+			int max_off = (int) (MIN(m->rectangle.width, m->rectangle.height) / 4);
+			unsigned int wrap = max_off > cascade_offset ? (unsigned int) (max_off / cascade_offset) : 1;
+			unsigned int idx = d->cascade_index % wrap;
+			c->floating_rectangle.x += (int) idx * cascade_offset;
+			c->floating_rectangle.y += (int) idx * cascade_offset;
+			d->cascade_index = (d->cascade_index + 1) % wrap;
+		}
 	}
 
 	strncpy(c->class_name, csq->class_name, sizeof(c->class_name) - 1);
