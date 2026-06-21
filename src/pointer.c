@@ -241,7 +241,7 @@ bool grab_pointer(pointer_action_t pac)
 		if (loc.node != mon->desk->focus) {
 			focus_node(loc.monitor, loc.desktop, loc.node);
 			return true;
-		} else if (focus_follows_pointer) {
+		} else {
 			stack(loc.desktop, loc.node, true);
 		}
 		return false;
