@@ -251,6 +251,7 @@ void set_window_state(bspwm_wid_t win, bspwm_wm_state_t state)
 
 void unmanage_window(bspwm_wid_t win)
 {
+	invalidate_geometry_cache(win);
 	coordinates_t loc;
 	if (locate_window(win, &loc)) {
 		put_status(SBSC_MASK_NODE_REMOVE, "node_remove 0x%08X 0x%08X 0x%08X\n", loc.monitor->id, loc.desktop->id, win);
@@ -855,18 +856,21 @@ void window_move(bspwm_wid_t win, int16_t x, int16_t y)
 {
 	uint32_t values[] = {x, y};
 	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_X_Y, values);
+	invalidate_geometry_cache(win);
 }
 
 void window_resize(bspwm_wid_t win, uint16_t w, uint16_t h)
 {
 	uint32_t values[] = {w, h};
 	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_WIDTH_HEIGHT, values);
+	invalidate_geometry_cache(win);
 }
 
 void window_move_resize(bspwm_wid_t win, int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
 	uint32_t values[] = {x, y, w, h};
 	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_X_Y_WIDTH_HEIGHT, values);
+	invalidate_geometry_cache(win);
 }
 
 void window_center(monitor_t *m, client_t *c)
