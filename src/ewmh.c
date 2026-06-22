@@ -280,7 +280,7 @@ void ewmh_update_client_list(bool stacking)
 		for (stacking_list_t *s = stack_head; s != NULL; s = s->next) {
 			wins[i++] = s->node->id;
 		}
-		xcb_ewmh_set_client_list_stacking(ewmh, default_screen, clients_count, wins);
+		xcb_ewmh_set_client_list_stacking(ewmh, default_screen, i, wins);
 	} else {
 		for (monitor_t *m = mon_head; m != NULL; m = m->next) {
 			for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
@@ -292,7 +292,7 @@ void ewmh_update_client_list(bool stacking)
 				}
 			}
 		}
-		xcb_ewmh_set_client_list(ewmh, default_screen, clients_count, wins);
+		xcb_ewmh_set_client_list(ewmh, default_screen, i, wins);
 	}
 
 	free(wins);
