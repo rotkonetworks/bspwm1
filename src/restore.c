@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "bspwm.h"
 #include "desktop.h"
 #include "ewmh.h"
@@ -124,13 +125,13 @@ bool restore_state(const char *file_path)
 	for (int i = 0; i < num; i++) {
 		if (keyeq("focusedMonitorId", t, json)) {
 			t++;
-			sscanf(json + t->start, "%u", &focused_monitor_id);
+			if (sscanf(json + t->start, "%u", &focused_monitor_id) != 1) { focused_monitor_id = 0; }
 		} else if (keyeq("primaryMonitorId", t, json)) {
 			t++;
-			sscanf(json + t->start, "%u", &primary_monitor_id);
+			if (sscanf(json + t->start, "%u", &primary_monitor_id) != 1) { primary_monitor_id = 0; }
 		} else if (keyeq("clientsCount", t, json)) {
 			t++;
-			sscanf(json + t->start, "%u", &clients_count);
+			if (sscanf(json + t->start, "%u", &clients_count) != 1) { clients_count = 0; }
 		} else if (keyeq("monitors", t, json)) {
 			t++;
 			int s = t->size;
@@ -225,22 +226,22 @@ bool restore_state(const char *file_path)
 #define RESTORE_INT(k, p) \
 	} else if (keyeq(#k, *t, json)) { \
 		(*t)++; \
-		sscanf(json + (*t)->start, "%i", p);
+		if (sscanf(json + (*t)->start, "%i", p) != 1) { *(p) = 0; }
 
 #define RESTORE_UINT(k, p) \
 	} else if (keyeq(#k, *t, json)) { \
 		(*t)++; \
-		sscanf(json + (*t)->start, "%u", p);
+		if (sscanf(json + (*t)->start, "%u", p) != 1) { *(p) = 0; }
 
 #define RESTORE_USINT(k, p) \
 	} else if (keyeq(#k, *t, json)) { \
 		(*t)++; \
-		sscanf(json + (*t)->start, "%hu", p);
+		if (sscanf(json + (*t)->start, "%hu", p) != 1) { *(p) = 0; }
 
 #define RESTORE_DOUBLE(k, p) \
 	} else if (keyeq(#k, *t, json)) { \
 		(*t)++; \
-		sscanf(json + (*t)->start, "%lf", p);
+		if (sscanf(json + (*t)->start, "%lf", p) != 1) { *(p) = 0; }
 
 #define RESTORE_ANY(k, p, f) \
 	} else if (keyeq(#k, *t, json)) { \
@@ -261,7 +262,10 @@ monitor_t *restore_monitor(jsmntok_t **t, char *json)
 	for (int i = 0; i < num; i++) {
 		if (keyeq("name", *t, json)) {
 			(*t)++;
-			snprintf(m->name, (*t)->end - (*t)->start + 1, "%s", json + (*t)->start);
+			int tlen = (int) ((*t)->end - (*t)->start);
+			if (tlen < 0) { tlen = 0; }
+			if ((size_t) tlen >= sizeof(m->name)) { tlen = (int) sizeof(m->name) - 1; }
+			snprintf(m->name, sizeof(m->name), "%.*s", tlen, json + (*t)->start);
 		RESTORE_UINT(id, &m->id)
 		RESTORE_UINT(randrId, &m->output_id)
 		RESTORE_BOOL(wired, &m->wired)
@@ -316,7 +320,10 @@ desktop_t *restore_desktop(jsmntok_t **t, char *json)
 	for (int i = 0; i < s; i++) {
 		if (keyeq("name", *t, json)) {
 			(*t)++;
-			snprintf(d->name, (*t)->end - (*t)->start + 1, "%s", json + (*t)->start);
+			int tlen = (int) ((*t)->end - (*t)->start);
+			if (tlen < 0) { tlen = 0; }
+			if ((size_t) tlen >= sizeof(d->name)) { tlen = (int) sizeof(d->name) - 1; }
+			snprintf(d->name, sizeof(d->name), "%.*s", tlen, json + (*t)->start);
 		RESTORE_UINT(id, &d->id)
 		RESTORE_ANY(layout, &d->layout, parse_layout)
 		RESTORE_ANY(userLayout, &d->user_layout, parse_layout)
@@ -324,7 +331,7 @@ desktop_t *restore_desktop(jsmntok_t **t, char *json)
 		RESTORE_UINT(borderWidth, &d->border_width)
 		} else if (keyeq("focusedNodeId", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%u", &focusedNodeId);
+			if (sscanf(json + (*t)->start, "%u", &focusedNodeId) != 1) { focusedNodeId = BSPWM_WID_NONE; }
 		} else if (keyeq("padding", *t, json)) {
 			(*t)++;
 			restore_padding(&d->padding, t, json);
@@ -361,7 +368,7 @@ node_t *restore_node(jsmntok_t **t, char *json)
 		for (int i = 0; i < s; i++) {
 			if (keyeq("id", *t, json)) {
 				(*t)++;
-				sscanf(json + (*t)->start, "%u", &n->id);
+				if (sscanf(json + (*t)->start, "%u", &n->id) != 1) { n->id = 0; }
 			RESTORE_ANY(splitType, &n->split_type, parse_split_type)
 			RESTORE_DOUBLE(splitRatio, &n->split_ratio)
 			RESTORE_BOOL(vacant, &n->vacant)
@@ -426,7 +433,7 @@ presel_t *restore_presel(jsmntok_t **t, char *json)
 		for (int i = 0; i < s; i++) {
 			if (keyeq("splitRatio", *t, json)) {
 				(*t)++;
-				sscanf(json + (*t)->start, "%lf", &p->split_ratio);
+				if (sscanf(json + (*t)->start, "%lf", &p->split_ratio) != 1) { p->split_ratio = 0.5; }
 			RESTORE_ANY(splitDir, &p->split_dir, parse_direction)
 			}
 
@@ -451,10 +458,16 @@ client_t *restore_client(jsmntok_t **t, char *json)
 		for (int i = 0; i < s; i++) {
 			if (keyeq("className", *t, json)) {
 				(*t)++;
-				snprintf(c->class_name, (*t)->end - (*t)->start + 1, "%s", json + (*t)->start);
+				int tlen = (int) ((*t)->end - (*t)->start);
+				if (tlen < 0) { tlen = 0; }
+				if ((size_t) tlen >= sizeof(c->class_name)) { tlen = (int) sizeof(c->class_name) - 1; }
+				snprintf(c->class_name, sizeof(c->class_name), "%.*s", tlen, json + (*t)->start);
 			} else if (keyeq("instanceName", *t, json)) {
 				(*t)++;
-				snprintf(c->instance_name, (*t)->end - (*t)->start + 1, "%s", json + (*t)->start);
+				int tlen = (int) ((*t)->end - (*t)->start);
+				if (tlen < 0) { tlen = 0; }
+				if ((size_t) tlen >= sizeof(c->instance_name)) { tlen = (int) sizeof(c->instance_name) - 1; }
+				snprintf(c->instance_name, sizeof(c->instance_name), "%.*s", tlen, json + (*t)->start);
 			RESTORE_ANY(state, &c->state, parse_client_state)
 			RESTORE_ANY(lastState, &c->last_state, parse_client_state)
 			RESTORE_ANY(layer, &c->layer, parse_stack_layer)
@@ -490,16 +503,16 @@ void restore_rectangle(bspwm_rect_t *r, jsmntok_t **t, char *json)
 	for (int i = 0; i < s; i++) {
 		if (keyeq("x", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%hi", &r->x);
+			if (sscanf(json + (*t)->start, "%hi", &r->x) != 1) { r->x = 0; }
 		} else if (keyeq("y", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%hi", &r->y);
+			if (sscanf(json + (*t)->start, "%hi", &r->y) != 1) { r->y = 0; }
 		} else if (keyeq("width", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%hu", &r->width);
+			if (sscanf(json + (*t)->start, "%hu", &r->width) != 1) { r->width = 0; }
 		} else if (keyeq("height", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%hu", &r->height);
+			if (sscanf(json + (*t)->start, "%hu", &r->height) != 1) { r->height = 0; }
 		}
 		(*t)++;
 	}
@@ -513,10 +526,10 @@ void restore_constraints(constraints_t *c, jsmntok_t **t, char *json)
 	for (int i = 0; i < s; i++) {
 		if (keyeq("min_width", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%hu", &c->min_width);
+			if (sscanf(json + (*t)->start, "%hu", &c->min_width) != 1) { c->min_width = 0; }
 		} else if (keyeq("min_height", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%hu", &c->min_height);
+			if (sscanf(json + (*t)->start, "%hu", &c->min_height) != 1) { c->min_height = 0; }
 		}
 		(*t)++;
 	}
@@ -530,16 +543,16 @@ void restore_padding(padding_t *p, jsmntok_t **t, char *json)
 	for (int i = 0; i < s; i++) {
 		if (keyeq("top", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%i", &p->top);
+			if (sscanf(json + (*t)->start, "%i", &p->top) != 1) { p->top = 0; }
 		} else if (keyeq("right", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%i", &p->right);
+			if (sscanf(json + (*t)->start, "%i", &p->right) != 1) { p->right = 0; }
 		} else if (keyeq("bottom", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%i", &p->bottom);
+			if (sscanf(json + (*t)->start, "%i", &p->bottom) != 1) { p->bottom = 0; }
 		} else if (keyeq("left", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%i", &p->left);
+			if (sscanf(json + (*t)->start, "%i", &p->left) != 1) { p->left = 0; }
 		}
 		(*t)++;
 	}
@@ -565,9 +578,18 @@ void restore_subscribers(jsmntok_t **t, char *json)
 	(*t)++;
 
 	for (int i = 0; i < s; i++) {
-		subscriber_list_t *s = make_subscriber(NULL, NULL, 0, 0);
-		restore_subscriber(s, t, json);
-		add_subscriber(s);
+		subscriber_list_t *sb = make_subscriber(NULL, NULL, 0, 0);
+		if (sb == NULL) {
+			warn("Restore subscribers: allocation failed, skipping.\n");
+			return;
+		}
+		restore_subscriber(sb, t, json);
+		if (sb->stream == NULL) {
+			free(sb->fifo_path);
+			free(sb);
+			continue;
+		}
+		add_subscriber(sb);
 	}
 }
 
@@ -579,9 +601,23 @@ void restore_subscriber(subscriber_list_t *s, jsmntok_t **t, char *json)
 	for (int i = 0; i < n; i++) {
 		if (keyeq("fileDescriptor", *t, json)) {
 			(*t)++;
-			int fd;
-			sscanf(json + (*t)->start, "%i", &fd);
-			s->stream = fdopen(fd, "w");
+			int fd = -1;
+			long fd_max = sysconf(_SC_OPEN_MAX);
+			if (fd_max <= 0) {
+				fd_max = 1024;
+			}
+			if (sscanf(json + (*t)->start, "%i", &fd) == 1 &&
+			    fd > STDERR_FILENO && fd < (int) fd_max) {
+				struct stat st;
+				if (fstat(fd, &st) == 0 &&
+				    (S_ISSOCK(st.st_mode) || S_ISFIFO(st.st_mode) || S_ISREG(st.st_mode))) {
+					s->stream = fdopen(fd, "w");
+				} else {
+					warn("Restore subscriber: rejecting fd %i (fstat failed or wrong type).\n", fd);
+				}
+			} else {
+				warn("Restore subscriber: rejecting out-of-range fd.\n");
+			}
 		} else if (keyeq("fifoPath", *t, json)) {
 			(*t)++;
 			free(s->fifo_path);
@@ -602,16 +638,19 @@ void restore_coordinates(coordinates_t *loc, jsmntok_t **t, char *json)
 	for (int i = 0; i < s; i++) {
 		if (keyeq("monitorId", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%u", &id);
-			loc->monitor = find_monitor(id);
+			if (sscanf(json + (*t)->start, "%u", &id) == 1) {
+				loc->monitor = find_monitor(id);
+			}
 		} else if (keyeq("desktopId", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%u", &id);
-			loc->desktop = find_desktop_in(id, loc->monitor);
+			if (sscanf(json + (*t)->start, "%u", &id) == 1) {
+				loc->desktop = find_desktop_in(id, loc->monitor);
+			}
 		} else if (keyeq("nodeId", *t, json)) {
 			(*t)++;
-			sscanf(json + (*t)->start, "%u", &id);
-			loc->node = find_by_id_in(loc->desktop != NULL ? loc->desktop->root : NULL, id);
+			if (sscanf(json + (*t)->start, "%u", &id) == 1) {
+				loc->node = find_by_id_in(loc->desktop != NULL ? loc->desktop->root : NULL, id);
+			}
 		}
 		(*t)++;
 	}
@@ -624,10 +663,11 @@ void restore_stack(jsmntok_t **t, char *json)
 
 	for (int i = 0; i < s; i++) {
 		uint32_t id;
-		sscanf(json + (*t)->start, "%u", &id);
-		coordinates_t loc;
-		if (locate_window(id, &loc)) {
-			stack_insert_after(stack_tail, loc.node);
+		if (sscanf(json + (*t)->start, "%u", &id) == 1) {
+			coordinates_t loc;
+			if (locate_window(id, &loc)) {
+				stack_insert_after(stack_tail, loc.node);
+			}
 		}
 		(*t)++;
 	}

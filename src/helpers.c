@@ -130,9 +130,16 @@ char *read_string(const char *file_path, size_t *tlen)
 
     close(fd);
 
-    if (*tlen < len) {
-        content[*tlen] = '\0';
+    if (*tlen >= len) {
+        char *rcontent = realloc(content, (*tlen + 1) * sizeof(char));
+        if (rcontent == NULL) {
+            perror("Read file: realloc");
+            free(content);
+            return NULL;
+        }
+        content = rcontent;
     }
+    content[*tlen] = '\0';
 
     return content;
 }
