@@ -57,7 +57,7 @@ monitor_t *make_monitor(const char *name, bspwm_rect_t *rect, uint32_t id)
 	if (!m)
 		return NULL;
 
-	m->id = (id == BSPWM_WID_NONE) ? ++clients_count : id;
+	m->id = (id == BSPWM_WID_NONE) ? ++id_counter : id;
 	m->output_id = BSPWM_OUTPUT_NONE;
 
 	if (name && *name) {

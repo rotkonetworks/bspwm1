@@ -909,7 +909,7 @@ void show_node(desktop_t *d, node_t *n)
 node_t *make_node(uint32_t id)
 {
 	if (id == BSPWM_WID_NONE) {
-		id = ++clients_count;
+		id = ++id_counter;
 	}
 	node_t *n = calloc(1, sizeof(node_t));
 	if (!n) {
@@ -2783,7 +2783,7 @@ static void regenerate_ids_in_bounded(node_t *n, int depth)
 	if (!n || n->client || depth > MAX_TREE_DEPTH) {
 		return;
 	}
-	n->id = ++clients_count;
+	n->id = ++id_counter;
 	regenerate_ids_in_bounded(n->first_child, depth + 1);
 	regenerate_ids_in_bounded(n->second_child, depth + 1);
 }

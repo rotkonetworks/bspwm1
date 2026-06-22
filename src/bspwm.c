@@ -61,6 +61,7 @@
 /* Global state */
 int default_screen, screen_width, screen_height;
 uint32_t clients_count;
+uint32_t id_counter;
 bspwm_wid_t root;
 char config_path[MAXLEN];
 
@@ -376,6 +377,7 @@ int main(int argc, char *argv[])
 void init(void)
 {
 	clients_count = 0;
+	id_counter = 0;
 	mon = mon_head = mon_tail = pri_mon = NULL;
 	history_head = history_tail = history_needle = NULL;
 	rule_head = rule_tail = NULL;

@@ -47,6 +47,7 @@ typedef struct {
 
 extern int default_screen, screen_width, screen_height;
 extern uint32_t clients_count;
+extern uint32_t id_counter;
 extern bspwm_wid_t root;
 extern char config_path[MAXLEN];
 

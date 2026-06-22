@@ -188,9 +188,9 @@ bool restore_state(const char *file_path)
 	}
 
 	for (monitor_t *m = mon_head; m != NULL; m = m->next) {
-		m->id = ++clients_count;
+		m->id = ++id_counter;
 		for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
-			d->id = ++clients_count;
+			d->id = ++id_counter;
 			regenerate_ids_in(d->root);
 			refresh_presel_feedbacks(m, d, d->root);
 			restack_presel_feedbacks(d);

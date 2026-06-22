@@ -238,7 +238,7 @@ desktop_t *make_desktop(const char *name, uint32_t id)
 		d->name[sizeof(d->name) - 1] = '\0';
 	}
 	
-	d->id = (id == BSPWM_WID_NONE) ? ++clients_count : id;
+	d->id = (id == BSPWM_WID_NONE) ? ++id_counter : id;
 	d->prev = d->next = NULL;
 	d->root = d->focus = NULL;
 	d->user_layout = LAYOUT_TILED;
