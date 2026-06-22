@@ -132,11 +132,15 @@ void history_remove(desktop_t *d, node_t *n, bool deep)
 				while (c != NULL && ((a->loc.node != NULL && a->loc.node == c->loc.node) ||
 				       (a->loc.node == NULL && a->loc.desktop == c->loc.desktop))) {
 					history_t *p = c->prev;
+					/* update head/tail/needle BEFORE freeing c, each independently */
 					if (history_head == c) {
-						history_head = history_tail;
+						history_head = c->next;
+					}
+					if (history_tail == c) {
+						history_tail = p;
 					}
 					if (history_needle == c) {
-						history_needle = history_tail;
+						history_needle = (c->next != NULL ? c->next : p);
 					}
 					free(c);
 					c = p;
@@ -146,6 +150,7 @@ void history_remove(desktop_t *d, node_t *n, bool deep)
 			if (c != NULL) {
 				c->next = a;
 			}
+			/* update head/tail/needle BEFORE freeing b, each independently */
 			if (history_tail == b) {
 				history_tail = c;
 			}
@@ -153,7 +158,7 @@ void history_remove(desktop_t *d, node_t *n, bool deep)
 				history_head = a;
 			}
 			if (history_needle == b) {
-				history_needle = c;
+				history_needle = (a != NULL ? a : c);
 			}
 			free(b);
 			b = c;

@@ -358,6 +358,14 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 			grabbing = false;
 		} else {
 			handle_event(evt);
+			/* handle_event may have moved the grabbed node to another
+			 * desktop/monitor (e.g. via _NET_WM_DESKTOP), which would
+			 * make loc.desktop / loc.monitor stale. Refresh loc so
+			 * subsequent move/resize/snap logic clamps against the
+			 * correct monitor. If the node is gone, exit the loop. */
+			if (grabbed_node && !locate_window(grabbed_node->id, &loc)) {
+				grabbed_node = NULL;
+			}
 		}
 	} while (grabbing && grabbed_node);
 

@@ -145,6 +145,10 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	if (csq->split_dir != NULL && f != NULL) {
 		presel_dir(m, d, f, *csq->split_dir);
 	}
+	if (csq->split_dir != NULL) {
+		free(csq->split_dir);
+		csq->split_dir = NULL;
+	}
 
 	if (csq->split_ratio != 0 && f != NULL) {
 		presel_ratio(m, d, f, csq->split_ratio);
@@ -269,7 +273,7 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 
 void set_window_state(bspwm_wid_t win, bspwm_wm_state_t state)
 {
-	long data[] = {state, BSPWM_WID_NONE};
+	uint32_t data[] = {state, BSPWM_WID_NONE};
 	xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, win, WM_STATE, WM_STATE, 32, 2, data);
 }
 

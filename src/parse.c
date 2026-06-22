@@ -234,8 +234,13 @@ static const bool valid_degrees[360] = {
 
 bool parse_degree(char *s, int *d)
 {
-   int i = atoi(s);
-   i = ((i % 360) + 360) % 360;
+   char *end;
+   errno = 0;
+   long parsed = strtol(s, &end, 10);
+   if (end == s || *end != '\0') {
+       return false;
+   }
+   int i = (int)(((parsed % 360) + 360) % 360);
 
    if (valid_degrees[i]) {
        *d = i;
@@ -248,11 +253,11 @@ bool parse_id(char *s, uint32_t *id)
 {
    char *end;
    errno = 0;
-   uint32_t v = strtol(s, &end, 0);
-   if (errno != 0 || *end != '\0') {
+   long v = strtol(s, &end, 0);
+   if (errno != 0 || *end != '\0' || v < 0) {
        return false;
    }
-   *id = v;
+   *id = (uint32_t)v;
    return true;
 }
 

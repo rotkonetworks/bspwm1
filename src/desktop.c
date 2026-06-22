@@ -182,7 +182,6 @@ bool transfer_desktop(monitor_t *ms, monitor_t *md, desktop_t *d, bool follow)
 	}
 
 	insert_desktop(md, d);
-	md->sticky_count += sc;
 	history_remove(d, NULL, false);
 
 	if (d_was_active) {
@@ -216,8 +215,10 @@ bool transfer_desktop(monitor_t *ms, monitor_t *md, desktop_t *d, bool follow)
 			activate_node(md, d, d->focus);
 	}
 
+	md->sticky_count += sc;
+
 	batch_ewmh_update();
-	put_status(SBSC_MASK_DESKTOP_TRANSFER, "desktop_transfer 0x%08X 0x%08X 0x%08X\n", 
+	put_status(SBSC_MASK_DESKTOP_TRANSFER, "desktop_transfer 0x%08X 0x%08X 0x%08X\n",
 	          ms->id, d->id, md->id);
 	put_status(SBSC_MASK_REPORT);
 

@@ -184,7 +184,9 @@ void prune_dead_subscribers(void)
 	while (sb != NULL) {
 		subscriber_list_t *next = sb->next;
 		// Is the subscriber's stream closed?
-		if (write(fileno(sb->stream), NULL, 0) == -1) {
+		// fcntl(F_GETFD) reliably reports EBADF for a closed fd
+		// without the UB of write(fd, NULL, 0) or its unreliable EPIPE behaviour.
+		if (fcntl(fileno(sb->stream), F_GETFD) == -1) {
 			remove_subscriber(sb);
 		}
 		sb = next;

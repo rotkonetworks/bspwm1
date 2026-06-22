@@ -2731,7 +2731,19 @@ void set_urgent(monitor_t *m, desktop_t *d, node_t *n, bool value)
 		return;
 	}
 
+	if (n->client->urgent == value) {
+		return;
+	}
+
 	n->client->urgent = value;
+
+	if (d) {
+		if (value) {
+			d->urgent_count++;
+		} else {
+			d->urgent_count = SAFE_SUB(d->urgent_count, 1);
+		}
+	}
 
 	if (value) {
 		n->client->wm_flags |= WM_FLAG_DEMANDS_ATTENTION;

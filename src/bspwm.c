@@ -97,6 +97,7 @@ bool randr;
 int main(int argc, char *argv[])
 {
 	char socket_path[MAXLEN];
+	bool socket_path_set = false;
 	char state_path[MAXLEN] = {0};
 	int run_level = 0;
 	config_path[0] = '\0';
@@ -138,7 +139,10 @@ int main(int argc, char *argv[])
 		if (config_home != NULL) {
 			snprintf(config_path, sizeof(config_path), "%s/%s/%s", config_home, WM_NAME, CONFIG_NAME);
 		} else {
-			snprintf(config_path, sizeof(config_path), "%s/%s/%s/%s", getenv("HOME"), ".config", WM_NAME, CONFIG_NAME);
+			char *home = getenv("HOME");
+			if (home != NULL) {
+				snprintf(config_path, sizeof(config_path), "%s/%s/%s/%s", home, ".config", WM_NAME, CONFIG_NAME);
+			}
 		}
 	}
 
@@ -201,6 +205,8 @@ int main(int argc, char *argv[])
 		if (listen(sock_fd, SOMAXCONN) == -1) {
 			err("Couldn't listen to the socket.\n");
 		}
+
+		socket_path_set = true;
 	}
 
 	fcntl(sock_fd, F_SETFD, FD_CLOEXEC | fcntl(sock_fd, F_GETFD));
@@ -372,8 +378,12 @@ int main(int argc, char *argv[])
 	}
 
 	close(epoll_fd);
-	close(sock_fd);
-	unlink(socket_path);
+	if (!restart) {
+		close(sock_fd);
+	}
+	if (socket_path_set) {
+		unlink(socket_path);
+	}
 
 	return exit_status;
 }

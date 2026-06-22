@@ -426,7 +426,7 @@ bool backend_get_urgency(bspwm_wid_t win)
 
 void backend_set_window_state(bspwm_wid_t win, bspwm_wm_state_t state)
 {
-	long data[] = {state, XCB_NONE};
+	uint32_t data[] = {state, XCB_NONE};
 	xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, win, WM_STATE, WM_STATE, 32, 2, data);
 }
 
@@ -717,6 +717,10 @@ static void get_atom(char *name, xcb_atom_t *atom)
 	if (reply) {
 		*atom = reply->atom;
 		free(reply);
+	} else {
+		/* Server disconnect or atom quota: leave callers with a defined
+		 * value instead of stack garbage. */
+		*atom = XCB_ATOM_NONE;
 	}
 }
 
@@ -799,6 +803,11 @@ void backend_grab_keys(void)
 	if (keybind_table.count == 0)
 		return;
 
+	/* TODO: cache the modifier mapping (currently fetched twice per call via
+	 * xcb_get_modifier_mapping_reply for Num_Lock and Scroll_Lock lookups)
+	 * and the xcb_key_symbols_t allocation, refreshing only on
+	 * XCB_MAPPING_NOTIFY, similarly to the previous key_symbols caching
+	 * fix. Avoids two server round-trips on every keybind reload. */
 	xcb_key_symbols_t *syms = xcb_key_symbols_alloc(dpy);
 	if (!syms)
 		return;
