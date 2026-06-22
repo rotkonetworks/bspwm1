@@ -61,10 +61,19 @@ bool restore_state(const char *file_path)
 		return false;
 	}
 
-	jsmn_init(&parser);
 	int ret;
 
-	while ((ret = jsmn_parse(&parser, json, jslen, tokens, (unsigned int)nbtok)) == JSMN_ERROR_NOMEM) {
+	/* Re-init the parser on every retry: jsmn_parse mutates parser state
+	 * on NOMEM (it has consumed input up to where it ran out of tokens),
+	 * so calling it again with a bigger token buffer but the same advanced
+	 * parser yields JSMN_ERROR_INVAL on the next character. Reset before
+	 * each attempt so the larger buffer parses the file from the start. */
+	for (;;) {
+		jsmn_init(&parser);
+		ret = jsmn_parse(&parser, json, jslen, tokens, (unsigned int)nbtok);
+		if (ret != JSMN_ERROR_NOMEM) {
+			break;
+		}
 		if (!safe_double(&nbtok)) {
 			warn("Restore tree: token count overflow\n");
 			free(tokens);
@@ -80,6 +89,8 @@ bool restore_state(const char *file_path)
 		}
 		tokens = rtokens;
 	}
+
+
 
 	if (ret < 0) {
 		warn("Restore tree: jsmn_parse: ");
