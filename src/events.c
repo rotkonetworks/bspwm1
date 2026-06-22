@@ -566,6 +566,8 @@ void handle_state(monitor_t *m, desktop_t *d, node_t *n, uint32_t state, unsigne
 #undef HANDLE_WM_STATE
 }
 
+static xcb_key_symbols_t *cached_key_symbols = NULL;
+
 void mapping_notify(void *evt)
 {
 	if (!evt || mapping_events_count == 0)
@@ -579,6 +581,11 @@ void mapping_notify(void *evt)
 	if (mapping_events_count > 0)
 		mapping_events_count--;
 
+	if (cached_key_symbols != NULL) {
+		xcb_key_symbols_free(cached_key_symbols);
+		cached_key_symbols = NULL;
+	}
+
 	ungrab_buttons();
 	grab_buttons();
 	backend_grab_keys();
@@ -591,12 +598,13 @@ void key_press(void *evt)
 
 	xcb_key_press_event_t *e = (xcb_key_press_event_t *)evt;
 
-	xcb_key_symbols_t *syms = xcb_key_symbols_alloc(dpy);
-	if (!syms)
-		return;
+	if (cached_key_symbols == NULL) {
+		cached_key_symbols = xcb_key_symbols_alloc(dpy);
+		if (!cached_key_symbols)
+			return;
+	}
 
-	xcb_keysym_t keysym = xcb_key_symbols_get_keysym(syms, e->detail, 0);
-	xcb_key_symbols_free(syms);
+	xcb_keysym_t keysym = xcb_key_symbols_get_keysym(cached_key_symbols, e->detail, 0);
 
 	/* Strip lock-key modifiers to match our KBMOD_* flags */
 	uint32_t modifiers = e->state & (BSP_MOD_MASK_SHIFT | BSP_MOD_MASK_CONTROL |

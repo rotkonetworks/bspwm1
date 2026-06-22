@@ -39,6 +39,7 @@ void ewmh_update_desktop_names(void);
 void ewmh_update_desktop_viewport(void);
 bool ewmh_handle_struts(bspwm_wid_t win);
 void ewmh_update_client_list(bool stacking);
+void ewmh_update_client_lists(void);
 void ewmh_wm_state_update(node_t *n);
 void ewmh_set_supporting(bspwm_wid_t win);
 

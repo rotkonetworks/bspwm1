@@ -169,6 +169,7 @@ void ewmh_update_desktop_viewport(void) {}
 void ewmh_set_wm_desktop(node_t *n, desktop_t *d) { (void)n; (void)d; }
 void ewmh_update_wm_desktops(void) {}
 void ewmh_update_client_list(bool stacking) { (void)stacking; }
+void ewmh_update_client_lists(void) {}
 void ewmh_wm_state_update(node_t *n) { (void)n; }
 void ewmh_set_supporting(bspwm_wid_t win) { (void)win; }
 bool ewmh_handle_struts(bspwm_wid_t win) { (void)win; return false; }
@@ -358,8 +359,7 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 		focus_node(m, d, n);
 	}
 
-	ewmh_update_client_list(false);
-	ewmh_update_client_list(true);
+	ewmh_update_client_lists();
 
 	put_status(SBSC_MASK_NODE_ADD, "node_add 0x%08X 0x%08X 0x%08X 0x%08X\n",
 	           m->id, d->id, f ? f->id : 0, win);

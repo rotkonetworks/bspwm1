@@ -125,18 +125,13 @@ void remove_stack_node(node_t *n)
 {
 	if (!n)
 		return;
-		
-	for (node_t *f = first_extrema(n); f; f = next_leaf(f, n)) {
-		stacking_list_t *s = stack_head;
-		stacking_list_t *next;
-		while (s) {
-			next = s->next;
-			if (s->node == f) {
-				remove_stack(s);
-				break;
-			}
-			s = next;
-		}
+
+	stacking_list_t *s = stack_head;
+	while (s) {
+		stacking_list_t *next = s->next;
+		if (is_descendant(s->node, n))
+			remove_stack(s);
+		s = next;
 	}
 }
 

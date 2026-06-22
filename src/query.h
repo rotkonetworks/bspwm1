@@ -89,6 +89,7 @@ int desktop_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst);
 int monitor_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst);
 __attribute__((warn_unused_result)) bool locate_leaf(bspwm_wid_t win, coordinates_t *loc);
 __attribute__((warn_unused_result)) bool locate_window(bspwm_wid_t win, coordinates_t *loc);
+void locate_window_cache_clear(void);
 __attribute__((warn_unused_result)) bool locate_desktop(char *name, coordinates_t *loc);
 __attribute__((warn_unused_result)) bool locate_monitor(char *name, coordinates_t *loc);
 __attribute__((warn_unused_result)) bool desktop_from_id(uint32_t id, coordinates_t *loc, monitor_t *mm);

@@ -1731,6 +1731,8 @@ void remove_node(monitor_t *m, desktop_t *d, node_t *n)
 		return;
 	}
 
+	locate_window_cache_clear();
+
 	unlink_node(m, d, n);
 	history_remove(d, n, true);
 	remove_stack_node(n);
@@ -1752,8 +1754,7 @@ void remove_node(monitor_t *m, desktop_t *d, node_t *n)
 		set_layout(m, d, LAYOUT_MONOCLE, false);
 	}
 
-	ewmh_update_client_list(false);
-	ewmh_update_client_list(true);
+	ewmh_update_client_lists();
 
 	if (mon && !d->focus) {
 		if (d == mon->desk) {

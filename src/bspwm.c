@@ -296,7 +296,6 @@ int main(int argc, char *argv[])
 				}
 			} else if (fd == dpy_fd) {
 #ifdef BACKEND_X11
-				xcb_aux_sync(dpy);
 				xcb_generic_event_t *event;
 				while ((event = xcb_poll_for_event(dpy)) != NULL) {
 					handle_event(event);

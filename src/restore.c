@@ -210,8 +210,7 @@ bool restore_state(const char *file_path)
 	ewmh_update_desktop_names();
 	ewmh_update_desktop_viewport();
 	ewmh_update_current_desktop();
-	ewmh_update_client_list(false);
-	ewmh_update_client_list(true);
+	ewmh_update_client_lists();
 	ewmh_update_active_window();
 
 	/* Restore X11 input focus to the focused window */

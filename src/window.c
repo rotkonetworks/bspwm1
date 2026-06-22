@@ -150,13 +150,15 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	c->border_width = csq->border ? d->border_width : 0;
 	n->client = c;
 	initialize_client(n);
-	initialize_floating_rectangle(n);
 
 	if (csq->rect != NULL) {
 		c->floating_rectangle = *csq->rect;
 		free(csq->rect);
-	} else if (c->floating_rectangle.x == 0 && c->floating_rectangle.y == 0) {
-		csq->center = true;
+	} else {
+		initialize_floating_rectangle(n);
+		if (c->floating_rectangle.x == 0 && c->floating_rectangle.y == 0) {
+			csq->center = true;
+		}
 	}
 
 	monitor_t *mm = monitor_from_client(c);
@@ -778,6 +780,19 @@ void query_pointer(bspwm_wid_t *win, bspwm_point_t *pt)
 				}
 			} else {
 				*win = qpr->child;
+				bool child_is_presel = false;
+				bool saw_any_node = false;
+				for (monitor_t *m = mon_head; m != NULL && !child_is_presel; m = m->next) {
+					for (desktop_t *d = m->desk_head; d != NULL && !child_is_presel; d = d->next) {
+						for (node_t *n = first_extrema(d->root); n != NULL; n = next_leaf(n, d->root)) {
+							saw_any_node = true;
+							if (n->presel != NULL && n->presel->feedback == qpr->child) {
+								child_is_presel = true;
+								break;
+							}
+						}
+					}
+				}
 				bspwm_point_t pt = {qpr->root_x, qpr->root_y};
 				for (stacking_list_t *s = stack_tail; s != NULL; s = s->prev) {
 					if (!s->node->client->shown || s->node->hidden) {
@@ -785,7 +800,7 @@ void query_pointer(bspwm_wid_t *win, bspwm_point_t *pt)
 					}
 					bspwm_rect_t rect = get_rectangle(NULL, NULL, s->node);
 					if (is_inside(pt, rect)) {
-						if (s->node->id == qpr->child || is_presel_window(qpr->child)) {
+						if (s->node->id == qpr->child || child_is_presel || (!saw_any_node && is_presel_window(qpr->child))) {
 							*win = s->node->id;
 						}
 						break;

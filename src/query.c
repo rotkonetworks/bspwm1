@@ -1047,10 +1047,43 @@ bool locate_leaf(bspwm_wid_t win, coordinates_t *loc)
 	return false;
 }
 
+/* Small LRU cache for locate_window: motion/configure/button/property-notify
+ * events frequently hit the same window in succession; without this each call
+ * walked every monitor/desktop/leaf. Entries are invalidated on remove_node. */
+#define LOCATE_WINDOW_CACHE_SIZE 16
+typedef struct {
+	bspwm_wid_t win;
+	coordinates_t loc;
+	bool valid;
+} locate_window_cache_entry_t;
+static locate_window_cache_entry_t locate_window_cache[LOCATE_WINDOW_CACHE_SIZE];
+
+/* Cleared on remove_node since free_node_bounded recursively frees children,
+ * any of which may be in the cache as stale node_t pointers. */
+void locate_window_cache_clear(void)
+{
+	for (size_t i = 0; i < LOCATE_WINDOW_CACHE_SIZE; i++) {
+		locate_window_cache[i].valid = false;
+	}
+}
+
 bool locate_window(bspwm_wid_t win, coordinates_t *loc)
 {
 	if (!loc) return false;
-	
+
+	for (size_t i = 0; i < LOCATE_WINDOW_CACHE_SIZE; i++) {
+		locate_window_cache_entry_t *e = &locate_window_cache[i];
+		if (e->valid && e->win == win) {
+			node_t *n = e->loc.node;
+			if (n && n->client && n->id == win) {
+				*loc = e->loc;
+				return true;
+			}
+			e->valid = false;
+			break;
+		}
+	}
+
 	for (monitor_t *m = mon_head; m; m = m->next) {
 		for (desktop_t *d = m->desk_head; d; d = d->next) {
 			for (node_t *n = first_extrema(d->root); n; n = next_leaf(n, d->root)) {
@@ -1060,6 +1093,11 @@ bool locate_window(bspwm_wid_t win, coordinates_t *loc)
 					loc->monitor = m;
 					loc->desktop = d;
 					loc->node = n;
+					static size_t locate_window_cache_next = 0;
+					locate_window_cache[locate_window_cache_next].win = win;
+					locate_window_cache[locate_window_cache_next].loc = *loc;
+					locate_window_cache[locate_window_cache_next].valid = true;
+					locate_window_cache_next = (locate_window_cache_next + 1) % LOCATE_WINDOW_CACHE_SIZE;
 					return true;
 				}
 			}
