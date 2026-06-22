@@ -467,6 +467,16 @@ void apply_snap_zone(coordinates_t *loc, monitor_t *target_monitor, snap_zone_t 
 	if (!d)
 		return;
 
+	/* Cross-monitor snap: move the node to the target monitor's desktop
+	 * before any geometry math, otherwise set_state/arrange operate on the
+	 * source desktop and the node's bspwm-internal location diverges from
+	 * what the user dropped. */
+	if (loc->monitor != m || loc->desktop != d) {
+		transfer_node(loc->monitor, loc->desktop, n, m, d, d->focus, false);
+		loc->monitor = m;
+		loc->desktop = d;
+	}
+
 	bspwm_rect_t rect = m->rectangle;
 
 	/* Account for padding with underflow protection */
