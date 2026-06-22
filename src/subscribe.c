@@ -81,6 +81,10 @@ void remove_subscriber(subscriber_list_t *sb)
 
 void add_subscriber(subscriber_list_t *sb)
 {
+	if (sb == NULL) {
+		perror("add_subscriber");
+		return;
+	}
 	if (subscribe_head == NULL) {
 		subscribe_head = subscribe_tail = sb;
 	} else {

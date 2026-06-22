@@ -84,6 +84,11 @@ void schedule_window(bspwm_wid_t win)
 
 bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 {
+	if (!mon || !mon->desk) {
+		warn("manage_window: no monitor/desktop available\n");
+		return false;
+	}
+
 	monitor_t *m = mon;
 	desktop_t *d = mon->desk;
 	node_t *f = mon->desk->focus;
@@ -146,7 +151,16 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	}
 
 	node_t *n = make_node(win);
+	if (n == NULL) {
+		perror("manage_window: make_node");
+		return false;
+	}
 	client_t *c = make_client();
+	if (c == NULL) {
+		perror("manage_window: make_client");
+		free_node(n);
+		return false;
+	}
 	c->border_width = csq->border ? d->border_width : 0;
 	n->client = c;
 	initialize_client(n);

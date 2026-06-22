@@ -249,6 +249,10 @@ event_queue_t *make_event_queue(void *evt)
 		if (csq->split_dir == NULL) { \
 			csq->split_dir = calloc(1, sizeof(direction_t)); \
 		} \
+		if (csq->split_dir == NULL) { \
+			perror("SET_CSQ_SPLIT_DIR: calloc"); \
+			break; \
+		} \
 		*(csq->split_dir) = (val); \
 	} while (0)
 
@@ -257,6 +261,10 @@ event_queue_t *make_event_queue(void *evt)
 		if (csq->state == NULL) { \
 			csq->state = calloc(1, sizeof(client_state_t)); \
 		} \
+		if (csq->state == NULL) { \
+			perror("SET_CSQ_STATE: calloc"); \
+			break; \
+		} \
 		*(csq->state) = (val); \
 	} while (0)
 
@@ -264,6 +272,10 @@ event_queue_t *make_event_queue(void *evt)
 	do { \
 		if (csq->layer == NULL) { \
 			csq->layer = calloc(1, sizeof(stack_layer_t)); \
+		} \
+		if (csq->layer == NULL) { \
+			perror("SET_CSQ_LAYER: calloc"); \
+			break; \
 		} \
 		*(csq->layer) = (val); \
 	} while (0)

@@ -2548,10 +2548,15 @@ void set_hidden(monitor_t *m, desktop_t *d, node_t *n, bool value)
 			d->focus = NULL;
 			draw_border(n, false, (mon == m));
 		}
-		if (d == mon->desk) {
-			focus_node(m, d, d->focus);
-		} else {
-			activate_node(m, d, d->focus);
+		if (m == NULL) {
+			m = mon;
+		}
+		if (m != NULL) {
+			if (mon != NULL && d == mon->desk) {
+				focus_node(m, d, d->focus);
+			} else {
+				activate_node(m, d, d->focus);
+			}
 		}
 	}
 

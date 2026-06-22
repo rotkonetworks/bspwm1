@@ -140,6 +140,11 @@ void cmd_node(char **args, int num, FILE *rsp)
 		return;
 	}
 
+	if (mon == NULL || mon->desk == NULL) {
+		fail(rsp, "node: No active monitor/desktop.\n");
+		return;
+	}
+
 	coordinates_t ref = {mon, mon->desk, mon->desk->focus};
 	coordinates_t trg = ref;
 
@@ -663,6 +668,11 @@ void cmd_desktop(char **args, int num, FILE *rsp)
 		return;
 	}
 
+	if (mon == NULL || mon->desk == NULL) {
+		fail(rsp, "desktop: No active monitor/desktop.\n");
+		return;
+	}
+
 	coordinates_t ref = {mon, mon->desk, NULL};
 	coordinates_t trg = ref;
 
@@ -856,6 +866,11 @@ void cmd_monitor(char **args, int num, FILE *rsp)
 		return;
 	}
 
+	if (mon == NULL) {
+		fail(rsp, "monitor: No active monitor.\n");
+		return;
+	}
+
 	coordinates_t ref = {mon, NULL, NULL};
 	coordinates_t trg = ref;
 
@@ -1000,6 +1015,16 @@ void cmd_monitor(char **args, int num, FILE *rsp)
 
 void cmd_query(char **args, int num, FILE *rsp)
 {
+	if (num < 1) {
+		fail(rsp, "query: Missing arguments.\n");
+		return;
+	}
+
+	if (mon == NULL || mon->desk == NULL) {
+		fail(rsp, "query: No active monitor/desktop.\n");
+		return;
+	}
+
 	coordinates_t monitor_ref = {mon, NULL, NULL};
 	coordinates_t desktop_ref = {mon, mon->desk, NULL};
 	coordinates_t node_ref = {mon, mon->desk, mon->desk->focus};
@@ -1010,11 +1035,6 @@ void cmd_query(char **args, int num, FILE *rsp)
 	domain_t dom = DOMAIN_TREE;
 	bool print_ids = true;
 	uint8_t d = 0;
-
-	if (num < 1) {
-		fail(rsp, "query: Missing arguments.\n");
-		return;
-	}
 
 	while (num > 0) {
 		if (streq("-T", *args) || streq("--tree", *args)) {
@@ -1448,6 +1468,11 @@ void cmd_config(char **args, int num, FILE *rsp)
 {
 	if (num < 1) {
 		fail(rsp, "config: Missing arguments.\n");
+		return;
+	}
+
+	if (mon == NULL || mon->desk == NULL) {
+		fail(rsp, "config: No active monitor/desktop.\n");
 		return;
 	}
 
