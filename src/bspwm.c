@@ -278,14 +278,19 @@ int main(int argc, char *argv[])
 						continue;
 					}
 				}
-				if (cli_fd > 0 && (n = recv(cli_fd, msg, sizeof(msg)-1, 0)) > 0) {
-					msg[n] = '\0';
-					FILE *rsp = fdopen(cli_fd, "w");
-					if (rsp != NULL) {
-						handle_message(msg, n, rsp);
-						scratch_reset();
+				if (cli_fd > 0) {
+					n = recv(cli_fd, msg, sizeof(msg)-1, 0);
+					if (n > 0) {
+						msg[n] = '\0';
+						FILE *rsp = fdopen(cli_fd, "w");
+						if (rsp != NULL) {
+							handle_message(msg, n, rsp);
+							scratch_reset();
+						} else {
+							warn("Can't open the client socket as file.\n");
+							close(cli_fd);
+						}
 					} else {
-						warn("Can't open the client socket as file.\n");
 						close(cli_fd);
 					}
 				}

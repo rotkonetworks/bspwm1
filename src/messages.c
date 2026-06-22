@@ -58,6 +58,7 @@ void handle_message(char *msg, int msg_len, FILE *rsp)
 
 	if (args == NULL) {
 		perror("Handle message: scratch_alloc");
+		fclose(rsp);
 		return;
 	}
 
@@ -66,10 +67,12 @@ void handle_message(char *msg, int msg_len, FILE *rsp)
 			if (j >= msg_len) {
 				/* No free needed - scratch_reset handles it */
 				perror("Handle message: buffer overflow");
+				fclose(rsp);
 				return;
 			}
 			if (num >= MAX_ARGS) {
 				fail(rsp, "Too many arguments.\n");
+				fclose(rsp);
 				return;
 			}
 			args[num++] = msg + j;
@@ -79,6 +82,7 @@ void handle_message(char *msg, int msg_len, FILE *rsp)
 
 	if (num < 1) {
 		fail(rsp, "No arguments given.\n");
+		fclose(rsp);
 		return;
 	}
 
@@ -120,6 +124,7 @@ void process_message(char **args, int num, FILE *rsp)
 		cmd_quit(++args, --num, rsp);
 	} else {
 		fail(rsp, "Unknown domain or command: '%s'.\n", *args);
+		fclose(rsp);
 		return;
 	}
 
