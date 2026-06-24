@@ -1621,6 +1621,12 @@ void unlink_node(monitor_t *m, desktop_t *d, node_t *n)
 		return;
 	}
 
+	/* Any node about to be unlinked, freed, or moved to another desktop
+	 * (transfer_node) may be cached in locate_window with now-stale
+	 * coordinates. Invalidate here so every structural change is covered,
+	 * not just remove_node. */
+	locate_window_cache_clear();
+
 	node_t *p = n->parent;
 
 	if (!p) {
@@ -2362,7 +2368,7 @@ bool set_state(monitor_t *m, desktop_t *d, node_t *n, client_state_t s)
 		           m->id, d->id, n->id, STATE_STR(c->state));
 	}
 
-	if (m && n == m->desk->focus) {
+	if (m && m->desk && n == m->desk->focus) {
 		put_status(SBSC_MASK_REPORT);
 	}
 
@@ -2680,7 +2686,7 @@ void set_private(monitor_t *m, desktop_t *d, node_t *n, bool value)
 		           m->id, d->id, n->id, ON_OFF_STR(value));
 	}
 
-	if (m && n == m->desk->focus) {
+	if (m && m->desk && n == m->desk->focus) {
 		put_status(SBSC_MASK_REPORT);
 	}
 }
@@ -2698,7 +2704,7 @@ void set_locked(monitor_t *m, desktop_t *d, node_t *n, bool value)
 		           m->id, d->id, n->id, ON_OFF_STR(value));
 	}
 
-	if (m && n == m->desk->focus) {
+	if (m && m->desk && n == m->desk->focus) {
 		put_status(SBSC_MASK_REPORT);
 	}
 }
@@ -2716,7 +2722,7 @@ void set_marked(monitor_t *m, desktop_t *d, node_t *n, bool value)
 		           m->id, d->id, n->id, ON_OFF_STR(value));
 	}
 
-	if (m && n == m->desk->focus) {
+	if (m && m->desk && n == m->desk->focus) {
 		put_status(SBSC_MASK_REPORT);
 	}
 }

@@ -297,6 +297,7 @@ void remove_monitor(monitor_t *m)
 	monitor_t *last_mon = mon;
 	unlink_monitor(m);
 	backend_destroy_window(m->root);
+	locate_window_cache_clear();
 	free(m);
 
 	if (mon != last_mon)

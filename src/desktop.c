@@ -338,6 +338,7 @@ void remove_desktop(monitor_t *m, desktop_t *d)
 	remove_node(m, d, d->root);
 	unlink_desktop(m, d);
 	history_remove(d, NULL, false);
+	locate_window_cache_clear();
 	free(d);
 
 	ewmh_update_current_desktop();

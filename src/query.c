@@ -1058,8 +1058,10 @@ typedef struct {
 } locate_window_cache_entry_t;
 static locate_window_cache_entry_t locate_window_cache[LOCATE_WINDOW_CACHE_SIZE];
 
-/* Cleared on remove_node since free_node_bounded recursively frees children,
- * any of which may be in the cache as stale node_t pointers. */
+/* Invalidated on every node unlink/free/transfer and on monitor/desktop
+ * removal. Entries store {monitor, desktop, node} by window id; any of those
+ * pointers can dangle once the tree mutates, and the on-hit check only
+ * re-validates the node, never the monitor/desktop. */
 void locate_window_cache_clear(void)
 {
 	for (size_t i = 0; i < LOCATE_WINDOW_CACHE_SIZE; i++) {
