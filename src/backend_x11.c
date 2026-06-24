@@ -738,6 +738,12 @@ void backend_set_atom(bspwm_wid_t win, const char *atom_name, uint32_t value)
 void x11_setup_screen(void)
 {
 	screen = xcb_setup_roots_iterator(xcb_get_setup(dpy)).data;
+	/* A NULL screen (incomplete/!ready X setup) otherwise segfaults
+	 * later in backend_get_root() and every screen->* access. Fail
+	 * cleanly with a diagnosable message instead. */
+	if (screen == NULL) {
+		err("Can't acquire the X screen.\n");
+	}
 }
 
 void x11_setup_atoms(void)
