@@ -298,7 +298,6 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 	uint16_t last_motion_x = pos.x, last_motion_y = pos.y;
 	xcb_timestamp_t last_motion_time = 0;
 	snap_zone_t final_snap_zone = SNAP_NONE;
-	monitor_t *final_snap_monitor = NULL;
 
 	xcb_generic_event_t *evt = NULL;
 
@@ -336,7 +335,6 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 					if (m != NULL) {
 						snap_zone_t zone = get_snap_zone(cur_pos, m);
 						final_snap_zone = zone;
-						final_snap_monitor = m;
 						show_snap_preview(m, zone);
 					} else {
 						/* Pointer between monitors - hide preview but keep last zone */
@@ -371,8 +369,16 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 
 	/* Hide snap preview and apply snap if released in a zone */
 	destroy_snap_preview();
-	if (pac == ACTION_MOVE && final_snap_zone != SNAP_NONE && grabbed_node && final_snap_monitor) {
-		apply_snap_zone(&loc, final_snap_monitor, final_snap_zone);
+	if (pac == ACTION_MOVE && final_snap_zone != SNAP_NONE && grabbed_node) {
+		/* The monitor under the pointer was cached during motion and may
+		 * have been freed by a RANDR-driven remove_monitor() in
+		 * handle_event(). Re-resolve from the live pointer position. */
+		bspwm_point_t pt;
+		query_pointer(NULL, &pt);
+		monitor_t *sm = monitor_from_point(pt);
+		if (sm != NULL) {
+			apply_snap_zone(&loc, sm, final_snap_zone);
+		}
 	}
 	snap_target_monitor = NULL;
 	

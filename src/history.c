@@ -133,14 +133,17 @@ void history_remove(desktop_t *d, node_t *n, bool deep)
 				       (a->loc.node == NULL && a->loc.desktop == c->loc.desktop))) {
 					history_t *p = c->prev;
 					/* update head/tail/needle BEFORE freeing c, each independently */
+					/* a/p survive this merge; c->next still points at the
+					 * entry freed on the previous iteration (links are not
+					 * repaired until after the loop), so never use it here. */
 					if (history_head == c) {
-						history_head = c->next;
+						history_head = a;
 					}
 					if (history_tail == c) {
 						history_tail = p;
 					}
 					if (history_needle == c) {
-						history_needle = (c->next != NULL ? c->next : p);
+						history_needle = (a != NULL ? a : p);
 					}
 					free(c);
 					c = p;
