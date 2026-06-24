@@ -82,10 +82,29 @@ void schedule_window(bspwm_wid_t win)
 	}
 }
 
+/* Free and NULL every heap field of a rule consequence. Safe on any exit
+ * path: each field is freed at most once and nulled, so neither a second
+ * call nor the caller's free(csq) can double-free. */
+static void clear_consequence_payload(rule_consequence_t *csq)
+{
+	if (csq->layer != NULL) {
+		secure_memzero(csq->layer, sizeof(stack_layer_t));
+		free(csq->layer);
+		csq->layer = NULL;
+	}
+	free(csq->state);
+	csq->state = NULL;
+	free(csq->rect);
+	csq->rect = NULL;
+	free(csq->split_dir);
+	csq->split_dir = NULL;
+}
+
 bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 {
 	if (!mon || !mon->desk) {
 		warn("manage_window: no monitor/desktop available\n");
+		clear_consequence_payload(csq);
 		return false;
 	}
 
@@ -104,8 +123,7 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	}
 
 	if (!csq->manage) {
-		if (csq->layer) { secure_memzero(csq->layer, sizeof(stack_layer_t)); free(csq->layer); }
-		free(csq->state);
+		clear_consequence_payload(csq);
 		window_show(win);
 		return false;
 	}
@@ -157,12 +175,14 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	node_t *n = make_node(win);
 	if (n == NULL) {
 		perror("manage_window: make_node");
+		clear_consequence_payload(csq);
 		return false;
 	}
 	client_t *c = make_client();
 	if (c == NULL) {
 		perror("manage_window: make_client");
 		free_node(n);
+		clear_consequence_payload(csq);
 		return false;
 	}
 	c->border_width = csq->border ? d->border_width : 0;
@@ -172,6 +192,7 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	if (csq->rect != NULL) {
 		c->floating_rectangle = *csq->rect;
 		free(csq->rect);
+		csq->rect = NULL;
 	} else {
 		initialize_floating_rectangle(n);
 		if (c->floating_rectangle.x == 0 && c->floating_rectangle.y == 0) {
@@ -265,8 +286,7 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 		draw_border(n, false, (m == mon));
 	}
 
-	if (csq->layer) { secure_memzero(csq->layer, sizeof(stack_layer_t)); free(csq->layer); }
-	free(csq->state);
+	clear_consequence_payload(csq);
 
 	return true;
 }
@@ -813,7 +833,7 @@ void query_pointer(bspwm_wid_t *win, bspwm_point_t *pt)
 				}
 				bspwm_point_t pt = {qpr->root_x, qpr->root_y};
 				for (stacking_list_t *s = stack_tail; s != NULL; s = s->prev) {
-					if (!s->node->client->shown || s->node->hidden) {
+					if (s->node->client == NULL || !s->node->client->shown || s->node->hidden) {
 						continue;
 					}
 					bspwm_rect_t rect = get_rectangle(NULL, NULL, s->node);

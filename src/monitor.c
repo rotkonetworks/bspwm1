@@ -498,6 +498,8 @@ bool update_monitors(void)
 							last_wired = m;
 						if (next == mb)
 							next = mb_next;
+						if (pri_mon == mb)
+							pri_mon = m;
 						merge_monitors(mb, m);
 						remove_monitor(mb);
 					}
@@ -513,6 +515,8 @@ bool update_monitors(void)
 		while (m) {
 			monitor_t *next = m->next;
 			if (!m->wired) {
+				if (pri_mon == m)
+					pri_mon = last_wired;
 				merge_monitors(m, last_wired);
 				remove_monitor(m);
 			}
