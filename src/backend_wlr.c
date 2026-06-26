@@ -142,6 +142,10 @@ struct bspwm_wlr_xwayland_surface {
 struct bspwm_wlr_layer_surface {
 	struct wlr_layer_surface_v1 *layer_surface;
 	struct wlr_scene_layer_surface_v1 *scene;
+	/* Cached layer index (0..3). Tracked so that when a client calls
+	 * set_layer() to move between layers we can reparent the scene
+	 * subtree to the matching layer_trees[] entry on commit. */
+	int current_layer;
 	struct wl_listener map;
 	struct wl_listener unmap;
 	struct wl_listener destroy;
@@ -354,6 +358,10 @@ static struct bspwm_wlr_toplevel *toplevel_from_id(bspwm_wid_t id)
 /*  Output (monitor) handling                                         */
 /* ------------------------------------------------------------------ */
 
+/* Forward decl: output state/mode changes need to re-arrange layers so
+ * that exclusive-zone padding tracks the new resolution. */
+static void arrange_layers(struct bspwm_wlr_output *output);
+
 static void output_frame(struct wl_listener *listener, void *data)
 {
 	(void)data;
@@ -373,6 +381,10 @@ static void output_request_state(struct wl_listener *listener, void *data)
 	struct bspwm_wlr_output *output = wl_container_of(listener, output, request_state);
 	const struct wlr_output_event_request_state *event = data;
 	wlr_output_commit_state(output->wlr_output, event->state);
+	/* Resolution or transform may have changed; recompute exclusive-zone
+	 * padding so tiled windows reflow into the new usable area. Without
+	 * this, hotplugging or rotating leaves stale m->padding values. */
+	arrange_layers(output);
 }
 
 static void output_destroy(struct wl_listener *listener, void *data)
@@ -1001,13 +1013,32 @@ static void arrange_layers(struct bspwm_wlr_output *output)
 		}
 	}
 
-	/* Update bspwm monitor padding from exclusive zones */
+	/* Update bspwm monitor padding from exclusive zones.
+	 * This is the Wayland equivalent of EWMH _NET_WM_STRUT_PARTIAL:
+	 * wlr-layer-shell surfaces (waybar, swaybg overlays, etc.) declare
+	 * an exclusive zone, and we shrink the monitor's usable rect so
+	 * tiled windows don't overlap them. */
 	monitor_t *m = get_monitor_by_output_id(output->id);
 	if (m) {
-		m->padding.top = usable_area.y;
-		m->padding.left = usable_area.x;
-		m->padding.right = full_area.width - (usable_area.x + usable_area.width);
-		m->padding.bottom = full_area.height - (usable_area.y + usable_area.height);
+		int new_top    = usable_area.y;
+		int new_left   = usable_area.x;
+		int new_right  = full_area.width  - (usable_area.x + usable_area.width);
+		int new_bottom = full_area.height - (usable_area.y + usable_area.height);
+		bool changed = (m->padding.top    != new_top    ||
+		                m->padding.left   != new_left   ||
+		                m->padding.right  != new_right  ||
+		                m->padding.bottom != new_bottom);
+		m->padding.top    = new_top;
+		m->padding.left   = new_left;
+		m->padding.right  = new_right;
+		m->padding.bottom = new_bottom;
+		if (changed) {
+			/* Re-tile every desktop on this monitor so windows reflow
+			 * around the freshly-claimed exclusive zone. */
+			for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
+				arrange(m, d);
+			}
+		}
 	}
 }
 
@@ -1017,6 +1048,19 @@ static void layer_surface_commit(struct wl_listener *listener, void *data)
 	(void)data;
 
 	if (!ls->layer_surface->initialized) return;
+
+	/* A client can call zwlr_layer_surface_v1::set_layer() to move
+	 * between layers after the initial map. The scene helper was
+	 * parented to layer_trees[current_layer] at create time, so we
+	 * must reparent the subtree on change — otherwise an overlay
+	 * demoted to background would keep rendering on top. */
+	int new_layer = (int)ls->layer_surface->current.layer;
+	if (new_layer < 0 || new_layer > 3) new_layer = ls->current_layer;
+	if (new_layer != ls->current_layer) {
+		wlr_scene_node_reparent(&ls->scene->tree->node,
+			server.layer_trees[new_layer]);
+		ls->current_layer = new_layer;
+	}
 
 	/* Find the output this layer is on */
 	struct bspwm_wlr_output *out;
@@ -1043,12 +1087,30 @@ static void layer_surface_destroy(struct wl_listener *listener, void *data)
 	struct bspwm_wlr_layer_surface *ls = wl_container_of(listener, ls, destroy);
 	(void)data;
 
+	/* Remember which output this lived on; we need to re-arrange after
+	 * it's gone so the freed exclusive zone is reclaimed by tiled
+	 * windows. Without this, killing waybar leaves m->padding stuck. */
+	struct wlr_output *wlr_out = ls->layer_surface->output;
+
 	wl_list_remove(&ls->map.link);
 	wl_list_remove(&ls->unmap.link);
 	wl_list_remove(&ls->destroy.link);
 	wl_list_remove(&ls->commit.link);
 	wl_list_remove(&ls->link);
 	free(ls);
+
+	/* arrange_layers iterates all *remaining* live layer surfaces for
+	 * the output and recomputes usable_area from full_area — so removing
+	 * `ls` above and re-arranging here releases its cached padding. */
+	if (wlr_out) {
+		struct bspwm_wlr_output *out;
+		wl_list_for_each(out, &server.outputs, link) {
+			if (out->wlr_output == wlr_out) {
+				arrange_layers(out);
+				break;
+			}
+		}
+	}
 }
 
 static void server_new_layer_surface(struct wl_listener *listener, void *data)
@@ -1061,12 +1123,30 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data)
 		layer_surfaces_initialized = true;
 	}
 
-	/* Assign output if not set */
+	/* Assign output if the client didn't specify one. Prefer the focused
+	 * monitor, then the primary monitor; only fall back to the first
+	 * output if bspwm core has no monitors yet. This keeps multi-monitor
+	 * bars (waybar without an explicit output:) from always landing on
+	 * the head of server.outputs. */
 	if (!layer_surface->output) {
+		bspwm_output_id_t want = 0;
+		if (mon)          want = mon->output_id;
+		else if (pri_mon) want = pri_mon->output_id;
+
 		struct bspwm_wlr_output *out;
-		wl_list_for_each(out, &server.outputs, link) {
-			layer_surface->output = out->wlr_output;
-			break;
+		if (want != 0) {
+			wl_list_for_each(out, &server.outputs, link) {
+				if (out->id == want) {
+					layer_surface->output = out->wlr_output;
+					break;
+				}
+			}
+		}
+		if (!layer_surface->output) {
+			wl_list_for_each(out, &server.outputs, link) {
+				layer_surface->output = out->wlr_output;
+				break;
+			}
 		}
 		if (!layer_surface->output) return;
 	}
@@ -1079,6 +1159,7 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data)
 	if (!ls) return;
 
 	ls->layer_surface = layer_surface;
+	ls->current_layer = layer_idx;
 	ls->scene = wlr_scene_layer_surface_v1_create(
 		server.layer_trees[layer_idx], layer_surface);
 
@@ -1873,7 +1954,19 @@ void backend_ewmh_set_wm_desktop(bspwm_wid_t win, uint32_t desktop) { (void)win;
 void backend_ewmh_update_client_list(bspwm_wid_t *list, uint32_t count, bool stacking) { (void)list; (void)count; (void)stacking; }
 void backend_ewmh_wm_state_update(bspwm_wid_t win, uint16_t wm_flags) { (void)win; (void)wm_flags; }
 void backend_ewmh_set_supporting(bspwm_wid_t win) { (void)win; }
-bool backend_ewmh_handle_struts(bspwm_wid_t win) { (void)win; return false; }
+bool backend_ewmh_handle_struts(bspwm_wid_t win)
+{
+	/* Wayland panels (waybar, etc.) reserve space via wlr-layer-shell's
+	 * exclusive zone, NOT EWMH _NET_WM_STRUT_PARTIAL. Layer-shell zones
+	 * are applied to monitor->padding in arrange_layers() above, which
+	 * also re-tiles affected desktops. So there is nothing to do here:
+	 * no Wayland-native client will ever set _NET_WM_STRUT.
+	 *
+	 * Returning false signals "no strut applied" — matching the X11
+	 * backend's contract when the window has no strut property. */
+	(void)win;
+	return false;
+}
 void backend_ewmh_get_struts(bspwm_wid_t win, int *top, int *right, int *bottom, int *left) { (void)win; *top = *right = *bottom = *left = 0; }
 
 /* ------------------------------------------------------------------ */
