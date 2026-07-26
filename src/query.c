@@ -888,22 +888,27 @@ int desktop_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst)
 		} else {
 			return SELECTOR_INVALID;
 		}
-	} else if (parse_id(desc, &id) && desktop_from_id(id, dst, NULL)) {
-		if (desktop_matches(dst, ref, &sel)) {
-			return SELECTOR_OK;
-		} else {
-			return SELECTOR_INVALID;
-		}
 	} else {
+		/*
+		 * Try matching by name before falling back to a raw internal
+		 * id: desktop ids are small sequential integers (see
+		 * id_counter in bspwm.c), so a plain numeric desktop name
+		 * (e.g. "5") would otherwise be shadowed by an unrelated
+		 * desktop that happens to hold internal id 5.
+		 */
 		int hits = 0;
 		if (desktop_from_name(desc, ref, dst, &sel, &hits)) {
 			return SELECTOR_OK;
-		} else {
-			if (hits > 0) {
-				return SELECTOR_INVALID;
+		} else if (hits == 0 && parse_id(desc, &id) && desktop_from_id(id, dst, NULL)) {
+			if (desktop_matches(dst, ref, &sel)) {
+				return SELECTOR_OK;
 			} else {
-				return SELECTOR_BAD_DESCRIPTOR;
+				return SELECTOR_INVALID;
 			}
+		} else if (hits > 0) {
+			return SELECTOR_INVALID;
+		} else {
+			return SELECTOR_BAD_DESCRIPTOR;
 		}
 	}
 
