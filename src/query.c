@@ -1007,6 +1007,20 @@ int monitor_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst)
 		} else {
 			return SELECTOR_INVALID;
 		}
+	} else if (locate_monitor(desc, dst)) {
+		/*
+		 * Match by name before falling back to a raw internal id:
+		 * monitor ids share the same small sequential id_counter as
+		 * desktops (see bspwm.c), so a monitor renamed to a bare
+		 * number (e.g. `bspc monitor -n 5`) would otherwise be
+		 * shadowed by an unrelated monitor that happens to hold
+		 * internal id 5.
+		 */
+		if (monitor_matches(dst, ref, &sel)) {
+			return SELECTOR_OK;
+		} else {
+			return SELECTOR_INVALID;
+		}
 	} else if (parse_id(desc, &id) && monitor_from_id(id, dst)) {
 		if (monitor_matches(dst, ref, &sel)) {
 			return SELECTOR_OK;
@@ -1014,15 +1028,7 @@ int monitor_from_desc(char *desc, coordinates_t *ref, coordinates_t *dst)
 			return SELECTOR_INVALID;
 		}
 	} else {
-		if (locate_monitor(desc, dst)) {
-			if (monitor_matches(dst, ref, &sel)) {
-				return SELECTOR_OK;
-			} else {
-				return SELECTOR_INVALID;
-			}
-		} else {
-			return SELECTOR_BAD_DESCRIPTOR;
-		}
+		return SELECTOR_BAD_DESCRIPTOR;
 	}
 
 end:
