@@ -53,6 +53,7 @@ bool is_leaf(node_t *n);
 bool is_first_child(node_t *n);
 bool is_second_child(node_t *n);
 unsigned int clients_count_in(node_t *n);
+unsigned int urgent_count_in(node_t *n);
 node_t *brother_tree(node_t *n);
 node_t *first_extrema(node_t *n);
 node_t *second_extrema(node_t *n);
