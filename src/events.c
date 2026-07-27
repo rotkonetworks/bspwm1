@@ -127,10 +127,16 @@ void configure_request(void *evt)
 		width = c->floating_rectangle.width;
 		height = c->floating_rectangle.height;
 
-		if (e->value_mask & XCB_CONFIG_WINDOW_X)
+		if (e->value_mask & XCB_CONFIG_WINDOW_X) {
 			c->floating_rectangle.x = e->x;
-		if (e->value_mask & XCB_CONFIG_WINDOW_Y)
+			if (c->border_width <= (unsigned)(INT16_MAX - c->floating_rectangle.x))
+				c->floating_rectangle.x -= c->border_width;
+		}
+		if (e->value_mask & XCB_CONFIG_WINDOW_Y) {
 			c->floating_rectangle.y = e->y;
+			if (c->border_width <= (unsigned)(INT16_MAX - c->floating_rectangle.y))
+				c->floating_rectangle.y -= c->border_width;
+		}
 		if (e->value_mask & XCB_CONFIG_WINDOW_WIDTH)
 			width = e->width;
 		if (e->value_mask & XCB_CONFIG_WINDOW_HEIGHT)
@@ -140,11 +146,6 @@ void configure_request(void *evt)
 		c->floating_rectangle.width = width;
 		c->floating_rectangle.height = height;
 		bspwm_rect_t r = c->floating_rectangle;
-
-		if (c->border_width <= (unsigned)(INT16_MAX - r.x))
-			r.x -= c->border_width;
-		if (c->border_width <= (unsigned)(INT16_MAX - r.y))
-			r.y -= c->border_width;
 
 		window_move_resize(e->window, r.x, r.y, r.width, r.height);
 
