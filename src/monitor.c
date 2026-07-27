@@ -529,6 +529,24 @@ bool update_monitors(void)
 			add_desktop(m, make_desktop(NULL, BSPWM_WID_NONE));
 	}
 
+	/*
+	 * The monitor holding focus can go unwired without being removed
+	 * (remove_unplugged_monitors is off by default), in which case `mon`
+	 * is left pointing at a monitor that no longer has a physical output.
+	 * New windows and unqualified focus/placement commands default to
+	 * `mon`, so leaving it there silently misdirects them to a monitor
+	 * that isn't displayed anywhere. Refocus a wired monitor instead.
+	 */
+	if (running && (!mon || !mon->wired)) {
+		monitor_t *m = pri_mon && pri_mon->wired ? pri_mon : NULL;
+		if (!m) {
+			for (m = mon_head; m && !m->wired; m = m->next) ;
+		}
+		if (m) {
+			focus_node(m, NULL, NULL);
+		}
+	}
+
 	if (!running && mon) {
 		if (pri_mon)
 			mon = pri_mon;
