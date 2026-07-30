@@ -941,7 +941,11 @@ void update_motion_recorder(void)
 			break;
 		}
 	}
-	if ((n != NULL && n != mon->desk->focus) || (n == NULL && m != mon)) {
+	ensure_focused_monitor();
+	bool differs = (n != NULL)
+	                ? (mon == NULL || mon->desk == NULL || n != mon->desk->focus)
+	                : (m != mon);
+	if (differs) {
 		enable_motion_recorder(win);
 	} else {
 		disable_motion_recorder();
@@ -1071,6 +1075,10 @@ void window_show(bspwm_wid_t win)
 
 void update_input_focus(void)
 {
+	ensure_focused_monitor();
+	if (mon == NULL || mon->desk == NULL) {
+		return;
+	}
 	set_input_focus(mon->desk->focus);
 }
 

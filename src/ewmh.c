@@ -29,6 +29,7 @@
 #include <limits.h>
 #include "backend_x11.h"
 #include "bspwm.h"
+#include "monitor.h"
 #include "settings.h"
 #include "tree.h"
 #include "ewmh.h"
@@ -42,7 +43,9 @@ void ewmh_init(void)
 
 void ewmh_update_active_window(void)
 {
-	xcb_window_t win = ((mon->desk->focus == NULL || mon->desk->focus->client == NULL) ? XCB_NONE : mon->desk->focus->id);
+	ensure_focused_monitor();
+	xcb_window_t win = ((mon == NULL || mon->desk == NULL || mon->desk->focus == NULL ||
+	                      mon->desk->focus->client == NULL) ? XCB_NONE : mon->desk->focus->id);
 	xcb_ewmh_set_active_window(ewmh, default_screen, win);
 }
 

@@ -454,6 +454,39 @@ bool find_any_monitor(coordinates_t *ref, coordinates_t *dst, monitor_select_t *
 	return false;
 }
 
+/*
+ * `mon` (the focused monitor) is only ever (re)assigned inside
+ * add_monitor(), unlink_monitor() and focus_node(). Nothing proactively
+ * repairs it when it merely goes stale: a monitor can go unwired without
+ * being removed, and state restoration can leave `mon` NULL if the saved
+ * focused-monitor id no longer resolves. Since most focus/EWMH-sync code
+ * dereferences `mon->desk` without checking it, a stale/NULL `mon` is a
+ * latent crash, not just a cosmetic issue. Call this from any chokepoint
+ * that is about to rely on `mon` (event handlers, state restore) so the
+ * WM self-heals on the next such call instead of staying broken until a
+ * monitor hotplug happens to fix it as a side effect. */
+void ensure_focused_monitor(void)
+{
+	if (mon != NULL && mon->wired) {
+		return;
+	}
+	monitor_t *m = pri_mon && pri_mon->wired ? pri_mon : NULL;
+	if (!m) {
+		for (m = mon_head; m && !m->wired; m = m->next) ;
+	}
+	if (!m) {
+		m = mon_head;
+	}
+	/* Only call focus_node() if it would actually change `mon`: if no
+	 * monitor is wired at all, `m` can end up equal to the current
+	 * (unwired) `mon`, and focus_node() unconditionally calls back into
+	 * ewmh_update_active_window() -> ensure_focused_monitor(), which
+	 * would pick the same `m` again and recurse without end. */
+	if (m && m != mon) {
+		focus_node(m, NULL, NULL);
+	}
+}
+
 /* Query outputs from the backend and update monitor state.
  * This replaces the old RandR-specific implementation. */
 bool update_monitors(void)
@@ -537,14 +570,8 @@ bool update_monitors(void)
 	 * `mon`, so leaving it there silently misdirects them to a monitor
 	 * that isn't displayed anywhere. Refocus a wired monitor instead.
 	 */
-	if (running && (!mon || !mon->wired)) {
-		monitor_t *m = pri_mon && pri_mon->wired ? pri_mon : NULL;
-		if (!m) {
-			for (m = mon_head; m && !m->wired; m = m->next) ;
-		}
-		if (m) {
-			focus_node(m, NULL, NULL);
-		}
+	if (running) {
+		ensure_focused_monitor();
 	}
 
 	if (!running && mon) {

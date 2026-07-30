@@ -661,7 +661,7 @@ bool activate_node(monitor_t *m, desktop_t *d, node_t *n)
 		}
 	}
 
-	if (d == mon->desk || (n && !is_focusable(n))) {
+	if ((mon != NULL && d == mon->desk) || (n && !is_focusable(n))) {
 		return false;
 	}
 
@@ -2039,8 +2039,8 @@ bool swap_nodes(monitor_t *m1, desktop_t *d1, node_t *n1, monitor_t *m2, desktop
 		history_remove(d1, n1, true);
 		history_remove(d2, n2, true);
 
-		bool d1_was_focused = (d1 == mon->desk);
-		bool d2_was_focused = (d2 == mon->desk);
+		bool d1_was_focused = (mon != NULL && d1 == mon->desk);
+		bool d2_was_focused = (mon != NULL && d2 == mon->desk);
 
 		if (m1->desk != d1 && m2->desk == d2) {
 			show_node(d2, n1);
@@ -2154,7 +2154,7 @@ bool transfer_node(monitor_t *ms, desktop_t *ds, node_t *ns, monitor_t *md, desk
 	bool focus_was_child = is_child(ns, ds->focus);
 	node_t *last_ds_focus = focus_was_child ? NULL : ds->focus;
 	uint32_t last_focus_id = focus_was_child ? 0 : (ds->focus ? ds->focus->id : 0);
-	bool ds_was_focused = (ds == mon->desk);
+	bool ds_was_focused = (mon != NULL && ds == mon->desk);
 
 	if (held_focus && ds_was_focused) {
 		clear_input_focus();
@@ -2232,7 +2232,7 @@ bool transfer_node(monitor_t *ms, desktop_t *ds, node_t *ns, monitor_t *md, desk
 		}
 		if (!held_focus || !follow || !ds_was_focused) {
 			if (dd->focus == ns) {
-				if (dd == mon->desk) {
+				if (mon != NULL && dd == mon->desk) {
 					focus_node(md, dd, held_focus ? last_ds_focus : ns);
 				} else {
 					activate_node(md, dd, held_focus ? last_ds_focus : ns);
@@ -2333,7 +2333,7 @@ void circulate_leaves(monitor_t *m, desktop_t *d, node_t *n, circulate_dir_t dir
 	if (p) {
 		node_t *f = focus_first_child ? p->first_child : p->second_child;
 		if (is_leaf(f)) {
-			if (d == mon->desk) {
+			if (mon != NULL && d == mon->desk) {
 				focus_node(m, d, f);
 			} else {
 				activate_node(m, d, f);

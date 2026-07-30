@@ -38,6 +38,7 @@ monitor_t *get_monitor_by_output_id(bspwm_output_id_t id);
 void embrace_client(monitor_t *m, client_t *c);
 void adapt_geometry(bspwm_rect_t *rs, bspwm_rect_t *rd, node_t *n);
 void add_monitor(monitor_t *m);
+void ensure_focused_monitor(void);
 void unlink_monitor(monitor_t *m);
 void remove_monitor(monitor_t *m);
 void merge_monitors(monitor_t *ms, monitor_t *md);

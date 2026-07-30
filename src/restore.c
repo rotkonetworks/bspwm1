@@ -274,6 +274,10 @@ bool restore_state(const char *file_path)
 			}
 		}
 	}
+	/* focused_monitor_id may fail to resolve (corrupted/edited dump, or a
+	 * monitor that no longer exists), leaving `mon` NULL with no fallback
+	 * up to this point. */
+	ensure_focused_monitor();
 
 	ewmh_update_number_of_desktops();
 	ewmh_update_desktop_names();
