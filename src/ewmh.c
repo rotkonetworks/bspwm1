@@ -89,7 +89,7 @@ bool ewmh_locate_desktop(uint32_t i, coordinates_t *loc)
 
 void ewmh_update_current_desktop(void)
 {
-	if (mon == NULL) {
+	if (mon == NULL || mon->desk == NULL) {
 		return;
 	}
 	uint32_t i = ewmh_get_desktop_index(mon->desk);
