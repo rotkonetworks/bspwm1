@@ -31,7 +31,7 @@
 bspwm \- Binary space partitioning window manager
 .SH "SYNOPSIS"
 .sp
-\fBbspwm\fR [\fB\-h\fR|\fB\-v\fR|\fB\-c\fR \fICONFIG_PATH\fR]
+\fBbspwm\fR [\fB\-h\fR|\fB\-v\fR|\fB\-c\fR \fICONFIG_PATH\fR|\fB\-i\fR]
 .sp
 \fBbspc \-\-print\-socket\-path\fR
 .sp
@@ -58,6 +58,13 @@ Print the version and exit\&.
 \fB\-c\fR \fICONFIG_PATH\fR
 .RS 4
 Use the given configuration file\&.
+.RE
+.PP
+\fB\-i\fR
+.RS 4
+Ignore all monitor updates after the initial startup detection\&. Equivalent to starting with the
+\fIignore_monitor_updates\fR
+setting already enabled\&.
 .RE
 .PP
 \fB\-\-print\-socket\-path\fR
@@ -1510,6 +1517,12 @@ Remove unplugged monitors\&.
 \fImerge_overlapping_monitors\fR
 .RS 4
 Merge overlapping monitors (the bigger remains)\&.
+.RE
+.PP
+\fIignore_monitor_updates\fR
+.RS 4
+Ignore all monitor updates (RandR/output hotplug events) after the initial startup detection\&. Can also be enabled from the start with the \fB\-i\fR command line option\&. Defaults to
+\fIfalse\fR\&.
 .RE
 .SS "Monitor and Desktop Settings"
 .PP

@@ -140,11 +140,12 @@ int main(int argc, char *argv[])
 	char msg[BUFSIZ] = {0};
 	char *end;
 	int opt;
+	bool cli_ignore_monitor_updates = false;
 
-	while ((opt = getopt(argc, argv, "hvc:s:o:")) != -1) {
+	while ((opt = getopt(argc, argv, "hvc:s:o:i")) != -1) {
 		switch (opt) {
 			case 'h':
-				printf(WM_NAME " [-h|-v|-c CONFIG_PATH]\n");
+				printf(WM_NAME " [-h|-v|-c CONFIG_PATH|-i]\n");
 				exit(EXIT_SUCCESS);
 				break;
 			case 'v':
@@ -164,6 +165,9 @@ int main(int argc, char *argv[])
 				if (*end != '\0') {
 					sock_fd = -1;
 				}
+				break;
+			case 'i':
+				cli_ignore_monitor_updates = true;
 				break;
 		}
 	}
@@ -189,6 +193,9 @@ int main(int argc, char *argv[])
 	}
 
 	load_settings();
+	if (cli_ignore_monitor_updates) {
+		ignore_monitor_updates = true;
+	}
 	setup();
 
 	if (state_path[0] != '\0') {

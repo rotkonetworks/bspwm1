@@ -1975,6 +1975,13 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 			return;
 		}
 		cascade_offset = o;
+	} else if (streq("ignore_monitor_updates", name)) {
+		bool b;
+		if (!parse_bool(value, &b)) {
+			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
+			return;
+		}
+		ignore_monitor_updates = b;
 #define SET_MON_BOOL(s) \
 	} else if (streq(#s, name)) { \
 		if (!parse_bool(value, &s)) { \
@@ -2109,6 +2116,7 @@ void get_setting(coordinates_t loc, char *name, FILE* rsp)
 	GET_BOOL(remove_disabled_monitors)
 	GET_BOOL(remove_unplugged_monitors)
 	GET_BOOL(merge_overlapping_monitors)
+	GET_BOOL(ignore_monitor_updates)
 #undef GET_BOOL
 	} else if (streq("tile_limit_enabled", name)) {
 		if (loc.desktop != NULL) {

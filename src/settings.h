@@ -67,6 +67,7 @@
 #define REMOVE_DISABLED_MONITORS    false
 #define REMOVE_UNPLUGGED_MONITORS   false
 #define MERGE_OVERLAPPING_MONITORS  false
+#define IGNORE_MONITOR_UPDATES      false
 
 #define TILE_LIMIT_ENABLED          false
 #define MAX_TILES_PER_DESKTOP       8
@@ -121,6 +122,7 @@ extern honor_size_hints_mode_t honor_size_hints;
 extern bool remove_disabled_monitors;
 extern bool remove_unplugged_monitors;
 extern bool merge_overlapping_monitors;
+extern bool ignore_monitor_updates;
 
 extern bool tile_limit_enabled;
 extern int max_tiles_per_desktop;

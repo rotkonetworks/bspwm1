@@ -70,6 +70,7 @@ honor_size_hints_mode_t honor_size_hints;
 bool remove_disabled_monitors;
 bool remove_unplugged_monitors;
 bool merge_overlapping_monitors;
+bool ignore_monitor_updates;
 
 bool tile_limit_enabled;
 int max_tiles_per_desktop;
@@ -141,6 +142,7 @@ void load_settings(void)
 	remove_disabled_monitors = REMOVE_DISABLED_MONITORS;
 	remove_unplugged_monitors = REMOVE_UNPLUGGED_MONITORS;
 	merge_overlapping_monitors = MERGE_OVERLAPPING_MONITORS;
+	ignore_monitor_updates = IGNORE_MONITOR_UPDATES;
 
 	tile_limit_enabled = TILE_LIMIT_ENABLED;
 	max_tiles_per_desktop = MAX_TILES_PER_DESKTOP;
