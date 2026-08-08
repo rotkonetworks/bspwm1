@@ -469,6 +469,9 @@ Commands
 *-l*, *--layer* below|normal|above::
 	Set the stacking layer of the selected window.
 
+*-S*, *--snap* left|right|top|bottom|top_left|top_right|bottom_left|bottom_right|maximize::
+	Snap the selected window to a region of its monitor, Windows-style. The window is made floating first if it isn't already, and the monitor's padding is honoured. *maximize* sets the fullscreen state instead of resizing. This is the same geometry used by the pointer drag-to-edge gesture (see *edge_snap_enabled*), reachable from a keybinding.
+
 *-i*, *--insert-receptacle*::
 	Insert a receptacle node at the selected node.
 
@@ -612,6 +615,9 @@ Commands
 *-o*, *--adopt-orphans*::
 	Manage all the unmanaged windows remaining from a previous session.
 
+*--prune-dead*::
+	Remove any node whose window no longer exists on the server, and print how many were removed. Such a node makes every subsequent restacking request fail against a dead window id, which silently desynchronises the visible stacking order from the tree. This sweep is run automatically after a state restore; use it manually if window layering starts behaving erratically. Costs one round-trip to the X server per managed window.
+
 *-h*, *--record-history* on|off::
 	Enable or disable the recording of node focus history.
 
@@ -650,6 +656,47 @@ General Syntax
 
 config [-m 'MONITOR_SEL'|-d 'DESKTOP_SEL'|-n 'NODE_SEL'] <setting> [<value>]::
 	Get or set the value of <setting>.
+
+Keybind
+~~~~~~~
+
+General Syntax
+^^^^^^^^^^^^^^
+
+keybind 'OPTIONS'::
+	Manage bspwm's built-in keybindings.
+
+Built-in keybindings exist mainly for the Wayland backend, where there is no
+*sxhkd* to grab keys. They work on X11 too, but note that bspwm and *sxhkd*
+cannot both hold a grab on the same key: whichever registers first wins and
+the other silently gets nothing. Prefer one or the other per key.
+
+A 'COMBO' is modifiers and a key joined by *+*, e.g. *"super + shift + q"*.
+Accepted modifier names are *super*/*mod4*, *alt*/*mod1*, *ctrl*/*control*,
+*shift*, *mod2*, *mod3* and *mod5*. The key is an XKB keysym name and is
+matched unshifted, so write *"super + shift + q"*, not *"super + Q"*. Num
+Lock, Caps Lock and Scroll Lock are ignored when matching.
+
+Options
+^^^^^^^
+
+*-a*, *--add* 'COMBO' 'COMMAND'::
+	Bind 'COMBO' to 'COMMAND', which is run via *sh -c*.
+
+*-r*, *--remove* 'COMBO'::
+	Remove the binding for 'COMBO'.
+
+*-l*, *--list*::
+	Print all bindings.
+
+*-c*, *--clear*::
+	Remove all bindings.
+
+*--load* 'PATH'::
+	Load bindings from a file of alternating 'COMBO' and command lines. Blank
+	lines and lines starting with *#* are ignored. This is not a full *sxhkd*
+	parser: brace expansion is not supported, and a combo line is only
+	recognised as such if it contains a *+*.
 
 Subscribe
 ~~~~~~~~~
@@ -761,6 +808,24 @@ Global Settings
 
 'swallow_first_click'::
 	Don't replay the click that makes a window focused if 'click_to_focus' isn't *none*.
+
+'raise_floating_on_click'::
+	Also raise a floating window when it is clicked, rather than only focusing it. Defaults to *true*.
+
+'edge_snap_enabled'::
+	Enable Windows-style edge snapping: dragging a window against a screen edge or corner snaps it to that region on release. See also *--snap* under *Node*. Defaults to *true*.
+
+'edge_snap_threshold'::
+	Distance in pixels from a monitor edge at which a drag enters a snap zone. Defaults to *20*.
+
+'cascade_offset'::
+	When bspwm centres a new floating window on its own initiative (because the window supplied no position), offset each successive one by this many pixels so they don't stack exactly on top of each other. Set to *0* to disable. Windows centred because a rule said *center=on* are never cascaded. Defaults to *20*.
+
+'tile_limit_enabled'::
+	Cap the number of tiled windows per desktop. Beyond the cap, new windows are made floating instead of being tiled. Can be set per desktop with *config -d*. Defaults to *false*.
+
+'max_tiles_per_desktop'::
+	The cap used when 'tile_limit_enabled' is set. A rule carrying *ignore_tile_limits=on* exempts matching windows. Defaults to *8*.
 
 'focus_follows_pointer'::
 	Focus the window under the pointer.

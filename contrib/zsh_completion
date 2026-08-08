@@ -128,11 +128,12 @@ _bspc_query_names() {
 }
 
 _bspc() {
-	local -a commands=(node desktop monitor query rule wm subscribe config quit) \
+	local -a commands=(node desktop monitor query rule wm subscribe config keybind quit) \
 		resize_handle=(top bottom top_left top_right bottom_left bottom_right left right) \
 		node_state=(tiled pseudo_tiled floating fullscreen) \
 		flag=(hidden sticky private locked marked urgent) \
 		layer=(below normal above) \
+		snap_zone=(left right top bottom top_left top_right bottom_left bottom_right maximize) \
 		dir=(north west south east) \
 		cycle_dir=(next prev)
 	local -a jump=($dir first second brother parent 1 2) \
@@ -181,6 +182,7 @@ _bspc() {
 				'*'{-y,--type}'[Set the splitting type of the selected node]: :(horizontal vertical)'\
 				'*'{-r,--ratio}'[Set the splitting ratio of the selected node (0 < ratio < 1)]: :( )'\
 				'*'{-R,--rotate}'[Rotate the tree rooted at the selected node]:angle:(90 270 180)'\
+				'*'{-S,--snap}"[Snap the selected window to a region of its monitor]:snap zone:(\$snap_zone)"\
 				'*'{-s,--swap}'[Swap the selected node with the given node]:node selector:_bspc_selector -- node'\
 				'*'{-t,--state}'[Set the state of the selected window]: :_bspc_prefix -- "~" "node state" node_state '\
 				'*'{-v,--move}'[Move the selected window by dx pixels horizontally and dy pixels vertically]:dx:( ):dy:( )'\
@@ -319,10 +321,10 @@ _bspc() {
 			local -a {look,behaviour,input}{_bool,}
 			look_bool=(presel_feedback borderless_monocle gapless_monocle borderless_singleton)
 			look=({normal,active,focused}_border_color {top,right,bottom,left}_padding {top,right,bottom,left}_monocle_padding presel_feedback_color border_width window_gap)
-			behaviour_bool=(single_monocle removal_adjustment ignore_ewmh_focus ignore_ewmh_struts center_pseudo_tiled honor_size_hints remove_disabled_monitors remove_unplugged_monitors merge_overlapping_monitors)
-			behaviour=(mapping_events_count ignore_ewmh_fullscreen external_rules_command split_ratio automatic_scheme initial_polarity directional_focus_tightness status_prefix)
-			input_bool=(swallow_first_click focus_follows_pointer pointer_follows_{focus,monitor})
-			input=(click_to_focus pointer_motion_interval pointer_modifier pointer_action{1,2,3})
+			behaviour_bool=(single_monocle removal_adjustment ignore_ewmh_focus ignore_ewmh_struts center_pseudo_tiled honor_size_hints remove_disabled_monitors remove_unplugged_monitors merge_overlapping_monitors tile_limit_enabled)
+			behaviour=(mapping_events_count ignore_ewmh_fullscreen external_rules_command split_ratio automatic_scheme initial_polarity directional_focus_tightness status_prefix max_tiles_per_desktop cascade_offset)
+			input_bool=(swallow_first_click focus_follows_pointer pointer_follows_{focus,monitor} raise_floating_on_click edge_snap_enabled)
+			input=(click_to_focus pointer_motion_interval pointer_modifier pointer_action{1,2,3} edge_snap_threshold)
 			if [[ "$CURRENT" == (2|3) ]];then
 				_arguments \
 					'-d[Set settings for the selected desktop]: :_bspc_selector -- desktop'\
