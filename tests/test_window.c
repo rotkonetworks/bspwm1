@@ -30,12 +30,23 @@ void check_request(xcb_connection_t *dpy, xcb_void_cookie_t cookie, char *msg)
 	}
 }
 
+/* Returns XCB_NONE when the font isn't available. Drawing the window id is
+ * cosmetic, and a bare X server (a CI container with no bitmap fonts
+ * installed) legitimately has no -misc-fixed-. Exiting here used to take the
+ * whole test window down with it, so every window-management assertion saw an
+ * empty tree and failed for a reason that had nothing to do with bspwm. */
 xcb_gc_t get_font_gc(xcb_connection_t *dpy, xcb_window_t win, const char *font_name)
 {
 	xcb_void_cookie_t ck;
 	xcb_font_t font = xcb_generate_id(dpy);
 	ck = xcb_open_font_checked(dpy, font, strlen(font_name), font_name);
-	check_request(dpy, ck, "Can't open font");
+	xcb_generic_error_t *err = xcb_request_check(dpy, ck);
+	if (err != NULL) {
+		fprintf(stderr, "Can't open font '%s' (error %u); "
+		                "skipping the window label.\n", font_name, err->error_code);
+		free(err);
+		return XCB_NONE;
+	}
 	xcb_gcontext_t gc = xcb_generate_id(dpy);
 	uint32_t mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT;
 	uint32_t values[] = {0xffcccccc, 0xff111111, font};
@@ -50,6 +61,9 @@ void render_text(xcb_connection_t *dpy, xcb_window_t win, int16_t x, int16_t y)
 	xcb_void_cookie_t ck;
 	snprintf(id, sizeof(id), "0x%08X", win);
 	xcb_gcontext_t gc = get_font_gc(dpy, win, "-*-fixed-medium-*-*-*-18-*-*-*-*-*-*-*");
+	if (gc == XCB_NONE) {
+		return;
+	}
 	/* Doesn't work without _checked */
 	ck = xcb_image_text_8_checked(dpy, strlen(id), win, gc, x, y, id);
 	check_request(dpy, ck, "Can't draw text");
