@@ -15,6 +15,7 @@ bool parse_split_mode(char *s, split_mode_t *m);
 bool parse_layout(char *s, layout_t *l);
 bool parse_client_state(char *s, client_state_t *t);
 bool parse_stack_layer(char *s, stack_layer_t *l);
+bool parse_snap_zone(char *s, snap_zone_t *z);
 bool parse_direction(char *s, direction_t *d);
 bool parse_cycle_direction(char *s, cycle_dir_t *d);
 bool parse_circulate_direction(char *s, circulate_dir_t *d);

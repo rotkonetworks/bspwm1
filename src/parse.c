@@ -61,6 +61,18 @@ LOOKUP_TABLE(stack_layer, stack_layer_t) {
    {"normal", LAYER_NORMAL}
 };
 
+LOOKUP_TABLE(snap_zone, snap_zone_t) {
+   {"bottom", SNAP_BOTTOM},
+   {"bottom_left", SNAP_BOTTOM_LEFT},
+   {"bottom_right", SNAP_BOTTOM_RIGHT},
+   {"left", SNAP_LEFT},
+   {"maximize", SNAP_MAXIMIZE},
+   {"right", SNAP_RIGHT},
+   {"top", SNAP_TOP},
+   {"top_left", SNAP_TOP_LEFT},
+   {"top_right", SNAP_TOP_RIGHT}
+};
+
 LOOKUP_TABLE(direction, direction_t) {
    {"east", DIR_EAST},
    {"north", DIR_NORTH},
@@ -129,6 +141,7 @@ BINARY_SEARCH_PARSER(split_mode, split_mode_t)
 BINARY_SEARCH_PARSER(layout, layout_t)
 BINARY_SEARCH_PARSER(client_state, client_state_t)
 BINARY_SEARCH_PARSER(stack_layer, stack_layer_t)
+BINARY_SEARCH_PARSER(snap_zone, snap_zone_t)
 BINARY_SEARCH_PARSER(direction, direction_t)
 BINARY_SEARCH_PARSER(cycle_direction, cycle_dir_t)
 BINARY_SEARCH_PARSER(circulate_direction, circulate_dir_t)

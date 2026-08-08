@@ -37,6 +37,7 @@
 #include "rule.h"
 #include "restore.h"
 #include "settings.h"
+#include "snap.h"
 #include "tree.h"
 #include "window.h"
 #include "common.h"
@@ -342,6 +343,26 @@ void cmd_node(char **args, int num, FILE *rsp)
 				fail(rsp, "%s", "");
 				break;
 			}
+			changed = true;
+		} else if (streq("-S", *args) || streq("--snap", *args)) {
+			num--, args++;
+			if (num < 1) {
+				fail(rsp, "node %s: Not enough arguments.\n", *(args - 1));
+				break;
+			}
+			snap_zone_t zone;
+			if (!parse_snap_zone(*args, &zone)) {
+				fail(rsp, "node %s: Invalid argument: '%s'.\n", *(args - 1), *args);
+				break;
+			}
+			if (trg.node == NULL || trg.node->client == NULL) {
+				fail(rsp, "%s", "");
+				break;
+			}
+			/* Snap within the node's own monitor. The drag path resolves the
+			 * target from the pointer instead, which is what lets a drag
+			 * cross monitors; a keybind has no pointer to consult. */
+			apply_snap_zone(&trg, trg.monitor, zone);
 			changed = true;
 		} else if (streq("-g", *args) || streq("--flag", *args)) {
 			num--, args++;
@@ -1362,6 +1383,9 @@ void cmd_wm(char **args, int num, FILE *rsp)
 			}
 		} else if (streq("-o", *args) || streq("--adopt-orphans", *args)) {
 			adopt_orphans();
+		} else if (streq("--prune-dead", *args)) {
+			unsigned int pruned = prune_dead_nodes();
+			fprintf(rsp, "%u\n", pruned);
 		} else if (streq("-g", *args) || streq("--get-status", *args)) {
 			print_report(rsp);
 		} else if (streq("-h", *args) || streq("--record-history", *args)) {
@@ -2198,16 +2222,26 @@ void cmd_keybind(char **args, int num, FILE *rsp)
 	} else if (streq("-l", *args) || streq("--list", *args)) {
 		for (int i = 0; i < keybind_table.count; i++) {
 			keybind_t *kb = &keybind_table.binds[i];
-			char combo[128] = {0};
-			int off = 0;
-			if (kb->modifiers & KBMOD_SUPER) off += snprintf(combo + off, sizeof(combo) - off, "super + ");
-			if (kb->modifiers & KBMOD_ALT)   off += snprintf(combo + off, sizeof(combo) - off, "alt + ");
-			if (kb->modifiers & KBMOD_CTRL)   off += snprintf(combo + off, sizeof(combo) - off, "ctrl + ");
-			if (kb->modifiers & KBMOD_SHIFT)  off += snprintf(combo + off, sizeof(combo) - off, "shift + ");
+			/* Every modifier parse_modifier() accepts must be printable here,
+			 * or --list misreports the binding it just stored. mod2/3/5 were
+			 * missing. Order matches the order parse_modifier documents. */
+			static const struct { uint32_t flag; const char *name; } mods[] = {
+				{KBMOD_SUPER, "super"}, {KBMOD_ALT,  "alt"},
+				{KBMOD_CTRL,  "ctrl"},  {KBMOD_SHIFT, "shift"},
+				{KBMOD_MOD2,  "mod2"},  {KBMOD_MOD3, "mod3"},
+				{KBMOD_MOD5,  "mod5"},
+			};
+			/* Stream straight to the response rather than assembling a
+			 * fixed buffer: no truncation to get wrong, and the output is
+			 * byte-identical. */
+			for (size_t j = 0; j < LENGTH(mods); j++) {
+				if (kb->modifiers & mods[j].flag) {
+					fprintf(rsp, "%s + ", mods[j].name);
+				}
+			}
 			char keysym_name[64];
 			xkb_keysym_get_name(kb->keysym, keysym_name, sizeof(keysym_name));
-			snprintf(combo + off, sizeof(combo) - off, "%s", keysym_name);
-			fprintf(rsp, "%s\n\t%s\n", combo, kb->command);
+			fprintf(rsp, "%s\n\t%s\n", keysym_name, kb->command);
 		}
 	} else if (streq("-c", *args) || streq("--clear", *args)) {
 		keybind_clear();

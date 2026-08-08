@@ -474,9 +474,9 @@ int16_t modfield_from_keysym(uint32_t keysym) { (void)keysym; return 0; }
 resize_handle_t get_handle(node_t *n, bspwm_point_t pos, pointer_action_t pac) { (void)n; (void)pos; (void)pac; return HANDLE_RIGHT; }
 void window_grab_button(bspwm_wid_t win, uint8_t button, uint16_t modifier) { (void)win; (void)button; (void)modifier; }
 
-/* ---- Snap stubs ---- */
-snap_zone_t get_snap_zone(bspwm_point_t pos, monitor_t *m) { (void)pos; (void)m; return SNAP_NONE; }
-void apply_snap_zone(coordinates_t *loc, monitor_t *target_monitor, snap_zone_t zone) { (void)loc; (void)target_monitor; (void)zone; }
+/* ---- Snap stubs ----
+ * get_snap_zone / apply_snap_zone are backend-agnostic and live in snap.c;
+ * only the X11 drag-preview overlay is stubbed here. */
 void show_snap_preview(monitor_t *m, snap_zone_t zone) { (void)m; (void)zone; }
 void hide_snap_preview(void) {}
 void destroy_snap_preview(void) {}
