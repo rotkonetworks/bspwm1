@@ -82,6 +82,41 @@ void schedule_window(bspwm_wid_t win)
 	}
 }
 
+/* True when another floating window on this desktop already has its top-left
+ * corner exactly here. Used to decide whether a newly centred window needs to
+ * be cascaded out of the way at all. */
+static bool floating_origin_taken(desktop_t *d, node_t *self, int16_t x, int16_t y)
+{
+	if (d == NULL) {
+		return false;
+	}
+	for (node_t *f = first_extrema(d->root); f != NULL; f = next_leaf(f, d->root)) {
+		if (f == self || f->client == NULL || f->hidden) {
+			continue;
+		}
+		if (!IS_FLOATING(f->client)) {
+			continue;
+		}
+		if (f->client->floating_rectangle.x == x &&
+		    f->client->floating_rectangle.y == y) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* A window that already covers the monitor has nothing to be nudged clear of,
+ * and offsetting it only pushes it off-screen. Screenshot and overlay tools
+ * (flameshot's selection surface, for one) come up exactly this way. */
+static bool fills_monitor(monitor_t *m, client_t *c)
+{
+	if (m == NULL || c == NULL) {
+		return false;
+	}
+	return c->floating_rectangle.width >= m->rectangle.width &&
+	       c->floating_rectangle.height >= m->rectangle.height;
+}
+
 /* Free and NULL every heap field of a rule consequence. Safe on any exit
  * path: each field is freed at most once and nulled, so neither a second
  * call nor the caller's free(csq) can double-free. */
@@ -218,13 +253,26 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 		 * says `center=on` the user asked for centred, and nudging it by
 		 * cascade_offset (20 by default) quietly breaks that for every such
 		 * rule — dialogs, pinentry, password prompts. */
-		if (auto_centered && cascade_offset > 0) {
+		if (auto_centered && cascade_offset > 0 && !fills_monitor(m, c)) {
+			/* Step aside only far enough to clear whatever is already
+			 * sitting at this position. The old code advanced a per-desktop
+			 * counter that never reset when windows closed, so a lone popup
+			 * on an empty desktop still came up displaced by whatever the
+			 * counter happened to hold. Cascading is only meaningful when
+			 * there is something to cascade away from. */
 			int max_off = (int) (MIN(m->rectangle.width, m->rectangle.height) / 4);
-			unsigned int wrap = max_off > cascade_offset ? (unsigned int) (max_off / cascade_offset) : 1;
-			unsigned int idx = d->cascade_index % wrap;
-			c->floating_rectangle.x += (int) idx * cascade_offset;
-			c->floating_rectangle.y += (int) idx * cascade_offset;
-			d->cascade_index = (d->cascade_index + 1) % wrap;
+			int steps = (cascade_offset > 0 && max_off > cascade_offset)
+			            ? max_off / cascade_offset : 1;
+			bspwm_rect_t base = c->floating_rectangle;
+			for (int i = 0; i < steps; i++) {
+				int16_t x = (int16_t) (base.x + i * cascade_offset);
+				int16_t y = (int16_t) (base.y + i * cascade_offset);
+				if (!floating_origin_taken(d, n, x, y)) {
+					c->floating_rectangle.x = x;
+					c->floating_rectangle.y = y;
+					break;
+				}
+			}
 		}
 	}
 
