@@ -1,3 +1,75 @@
+# v1.3.0
+
+### New
+
+- `bspc node -S|--snap ZONE` snaps the selected window to a region of its
+  monitor (`left right top bottom top_left top_right bottom_left bottom_right
+  maximize`), floating it first and honouring monitor padding. This exposes the
+  geometry that was previously reachable only by dragging a window to a screen
+  edge, so it can be bound to a key. Works on both backends.
+
+### Fixed
+
+- **Wayland: every keybinding with `shift` was dead.** Matching used
+  `xkb_state_key_get_syms`, which applies the current shift level, so
+  `super + shift + q` produced `Q` and `super + shift + 1` produced `exclam` —
+  neither can match what `keybind --add` stored, since combos are parsed
+  case-insensitively to the lowercase form. Now matched at shift level 0, as
+  the X11 backend already did.
+- **Num Lock disabled every built-in keybinding.** `key_press` kept mod2/3/5 in
+  the modifier set while `backend_grab_keys` deliberately grabs through all
+  lock combinations, so with Num Lock on the grab fired, the lookup missed, and
+  the key was swallowed with nothing run. The Wayland path folded Caps and Mod2
+  in for the same effect. Both now ignore the lock modifiers.
+- `snap` zones `top` and `bottom` existed in the enum but fell through to
+  `default:`, so they never did anything, including by drag.
+- `raise_floating_on_click` was accepted by `bspc config` and never read.
+- `cascade_offset` (default 20) was applied to every centred window, including
+  those a rule explicitly centred with `center=on`, quietly un-centring
+  dialogs, pinentry and password prompts. It now applies only when bspwm
+  centred the window on its own initiative.
+- `ignore_tile_limits` matched on window class alone and treated a wildcard
+  class as a match, so any `*`-class rule carrying it switched tile limits off
+  for every window. It now matches class, instance and name the way rules do,
+  and matches the effect as a whole token rather than a substring. It also no
+  longer costs a synchronous X round-trip on every tiled insert.
+- A window forced floating by the tile limit had its state assigned directly,
+  leaving `last_state` unset and the node non-vacant, so `-t ~tiled` had
+  nothing to return to and tiling split maths still counted it.
+- The tiled-window counter used a bounded explicit stack that skipped a child
+  push when full, silently dropping whole subtrees and under-counting.
+- `keybind --list` never printed `mod2`, `mod3` or `mod5`, misreporting
+  bindings it had just stored.
+- The geometry cache was only invalidated where bspwm itself moved a window, so
+  a client-initiated resize could serve a stale rectangle for up to the cache
+  TTL. `ConfigureNotify` now invalidates.
+- `bspc wm -r` called `fclose(NULL)` and crashed when the state file could not
+  be opened, and would otherwise re-exec pointing at a file that was not there,
+  orphaning every window. The restart is now cancelled instead.
+- The restart state file is copied aside before it is consumed, so a restore
+  that goes wrong can still be diagnosed.
+- Nodes whose window died across a restart are reaped after a state restore,
+  instead of lingering and silently corrupting every later restack.
+- `backend_grab_keys` issued duplicate grabs for lock combinations that collapse
+  onto each other when a lock is unmapped.
+
+### Packaging
+
+- **The release workflow had been failing on every tag since v1.2.3**, so no
+  binaries were published for v1.2.3 through v1.2.10. The build died on a
+  missing `xkbcommon` header: the keybinding feature added the dependency and
+  the CI package list was never updated. Fixed, and the workflow now runs the
+  test suite so a broken tag fails loudly rather than shipping nothing.
+- `libxkbcommon` added to the PKGBUILD dependencies, which were missing it for
+  the same reason.
+
+### Documentation
+
+- Documented `bspc keybind`, `node --snap`, and the settings this fork adds
+  (`raise_floating_on_click`, `edge_snap_enabled`, `edge_snap_threshold`,
+  `cascade_offset`, `tile_limit_enabled`, `max_tiles_per_desktop`), none of
+  which had a man page entry. Added them to the bash, fish and zsh completions.
+
 # v0.11.6
 
 ### Security Hardening & Warning Resolution
