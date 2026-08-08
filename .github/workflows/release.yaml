@@ -19,8 +19,11 @@ jobs:
         ref: ${{ inputs.tag || github.ref }}
     - name: Install dependencies
       run: |
+        # xorg-fonts-misc supplies the -misc-fixed- bitmap font that
+        # tests/test_window.c opens to label its window; without it the helper
+        # exits and every window-management test sees an empty tree.
         pacman -Syu --noconfirm base-devel libxcb xcb-util xcb-util-keysyms \
-          xcb-util-wm libxkbcommon wayland xorg-server-xvfb
+          xcb-util-wm libxkbcommon wayland xorg-server-xvfb xorg-fonts-misc
     - name: Build
       run: make
     # Every tag from v1.2.3 to v1.2.10 produced no binaries: the build failed
