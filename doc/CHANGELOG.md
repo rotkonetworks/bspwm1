@@ -1,3 +1,16 @@
+# v1.3.1
+
+### Fixed
+
+- **Centred windows were displaced even when nothing was in the way.**
+  `cascade_offset` advanced a per-desktop counter that incremented on every
+  centred window and never reset when those windows closed, so a lone popup on
+  an empty desktop still came up offset by whatever the counter held. Most
+  visibly this pushed monitor-sized screenshot overlays (flameshot's selection
+  surface) partly off-screen, by a margin that grew with each use. Cascading
+  now happens only when the target position is genuinely occupied by another
+  floating window, and never for a window that already covers the monitor.
+
 # v1.3.0
 
 ### New
