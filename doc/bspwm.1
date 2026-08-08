@@ -2,12 +2,12 @@
 .\"     Title: bspwm
 .\"    Author: [see the "Author" section]
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: 04/05/2023
+.\"      Date: 08/09/2026
 .\"    Manual: Bspwm Manual
-.\"    Source: Bspwm 0.9.10-49-gc58c67a
+.\"    Source: Bspwm v1.3.0
 .\"  Language: English
 .\"
-.TH "BSPWM" "1" "04/05/2023" "Bspwm 0\&.9\&.10\-49\-gc58c67a" "Bspwm Manual"
+.TH "BSPWM" "1" "08/09/2026" "Bspwm v1\&.3\&.0" "Bspwm Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -774,6 +774,14 @@ Set or toggle the given flag for the selected node\&.
 Set the stacking layer of the selected window\&.
 .RE
 .PP
+\fB\-S\fR, \fB\-\-snap\fR left|right|top|bottom|top_left|top_right|bottom_left|bottom_right|maximize
+.RS 4
+Snap the selected window to a region of its monitor, Windows\-style\&. The window is made floating first if it isn\(cqt already, and the monitor\(cqs padding is honoured\&.
+\fBmaximize\fR
+sets the fullscreen state instead of resizing\&. This is the same geometry used by the pointer drag\-to\-edge gesture (see
+\fBedge_snap_enabled\fR), reachable from a keybinding\&.
+.RE
+.PP
 \fB\-i\fR, \fB\-\-insert\-receptacle\fR
 .RS 4
 Insert a receptacle node at the selected node\&.
@@ -1030,6 +1038,11 @@ Reorder the list of monitors to match the given order\&.
 Manage all the unmanaged windows remaining from a previous session\&.
 .RE
 .PP
+\fB\-\-prune\-dead\fR
+.RS 4
+Remove any node whose window no longer exists on the server, and print how many were removed\&. Such a node makes every subsequent restacking request fail against a dead window id, which silently desynchronises the visible stacking order from the tree\&. This sweep is run automatically after a state restore; use it manually if window layering starts behaving erratically\&. Costs one round\-trip to the X server per managed window\&.
+.RE
+.PP
 \fB\-h\fR, \fB\-\-record\-history\fR on|off
 .RS 4
 Enable or disable the recording of node focus history\&.
@@ -1098,6 +1111,71 @@ List the rules\&.
 config [\-m \fIMONITOR_SEL\fR|\-d \fIDESKTOP_SEL\fR|\-n \fINODE_SEL\fR] <setting> [<value>]
 .RS 4
 Get or set the value of <setting>\&.
+.RE
+.RE
+.SS "Keybind"
+.sp
+.it 1 an-trap
+.nr an-no-space-flag 1
+.nr an-break-flag 1
+.br
+.ps +1
+\fBGeneral Syntax\fR
+.RS 4
+.PP
+keybind \fIOPTIONS\fR
+.RS 4
+Manage bspwm\(cqs built\-in keybindings\&.
+.RE
+.sp
+Built\-in keybindings exist mainly for the Wayland backend, where there is no \fBsxhkd\fR to grab keys\&. They work on X11 too, but note that bspwm and \fBsxhkd\fR cannot both hold a grab on the same key: whichever registers first wins and the other silently gets nothing\&. Prefer one or the other per key\&.
+.sp
+A \fICOMBO\fR is modifiers and a key joined by \fB+\fR, e\&.g\&. \fB"super + shift + q"\fR\&. Accepted modifier names are \fBsuper\fR/\fBmod4\fR, \fBalt\fR/\fBmod1\fR, \fBctrl\fR/\fBcontrol\fR, \fBshift\fR, \fBmod2\fR, \fBmod3\fR and \fBmod5\fR\&. The key is an XKB keysym name and is matched unshifted, so write \fB"super + shift + q"\fR, not \fB"super + Q"\fR\&. Num Lock, Caps Lock and Scroll Lock are ignored when matching\&.
+.RE
+.sp
+.it 1 an-trap
+.nr an-no-space-flag 1
+.nr an-break-flag 1
+.br
+.ps +1
+\fBOptions\fR
+.RS 4
+.PP
+\fB\-a\fR, \fB\-\-add\fR \fICOMBO\fR \fICOMMAND\fR
+.RS 4
+Bind
+\fICOMBO\fR
+to
+\fICOMMAND\fR, which is run via
+\fBsh \-c\fR\&.
+.RE
+.PP
+\fB\-r\fR, \fB\-\-remove\fR \fICOMBO\fR
+.RS 4
+Remove the binding for
+\fICOMBO\fR\&.
+.RE
+.PP
+\fB\-l\fR, \fB\-\-list\fR
+.RS 4
+Print all bindings\&.
+.RE
+.PP
+\fB\-c\fR, \fB\-\-clear\fR
+.RS 4
+Remove all bindings\&.
+.RE
+.PP
+\fB\-\-load\fR \fIPATH\fR
+.RS 4
+Load bindings from a file of alternating
+\fICOMBO\fR
+and command lines\&. Blank lines and lines starting with
+\fB#\fR
+are ignored\&. This is not a full
+\fBsxhkd\fR
+parser: brace expansion is not supported, and a combo line is only recognised as such if it contains a
+\fB+\fR\&.
 .RE
 .RE
 .SS "Subscribe"
@@ -1322,6 +1400,54 @@ Don\(cqt replay the click that makes a window focused if
 \fIclick_to_focus\fR
 isn\(cqt
 \fBnone\fR\&.
+.RE
+.PP
+\fIraise_floating_on_click\fR
+.RS 4
+Also raise a floating window when it is clicked, rather than only focusing it\&. Defaults to
+\fBtrue\fR\&.
+.RE
+.PP
+\fIedge_snap_enabled\fR
+.RS 4
+Enable Windows\-style edge snapping: dragging a window against a screen edge or corner snaps it to that region on release\&. See also
+\fB\-\-snap\fR
+under
+\fBNode\fR\&. Defaults to
+\fBtrue\fR\&.
+.RE
+.PP
+\fIedge_snap_threshold\fR
+.RS 4
+Distance in pixels from a monitor edge at which a drag enters a snap zone\&. Defaults to
+\fB20\fR\&.
+.RE
+.PP
+\fIcascade_offset\fR
+.RS 4
+When bspwm centres a new floating window on its own initiative (because the window supplied no position), offset each successive one by this many pixels so they don\(cqt stack exactly on top of each other\&. Set to
+\fB0\fR
+to disable\&. Windows centred because a rule said
+\fBcenter=on\fR
+are never cascaded\&. Defaults to
+\fB20\fR\&.
+.RE
+.PP
+\fItile_limit_enabled\fR
+.RS 4
+Cap the number of tiled windows per desktop\&. Beyond the cap, new windows are made floating instead of being tiled\&. Can be set per desktop with
+\fBconfig \-d\fR\&. Defaults to
+\fBfalse\fR\&.
+.RE
+.PP
+\fImax_tiles_per_desktop\fR
+.RS 4
+The cap used when
+\fItile_limit_enabled\fR
+is set\&. A rule carrying
+\fBignore_tile_limits=on\fR
+exempts matching windows\&. Defaults to
+\fB8\fR\&.
 .RE
 .PP
 \fIfocus_follows_pointer\fR
