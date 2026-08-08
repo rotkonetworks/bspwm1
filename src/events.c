@@ -193,7 +193,15 @@ void configure_notify(void *evt)
 	if (e->window == root) {
 		screen_width = e->width;
 		screen_height = e->height;
+		return;
 	}
+
+	/* The geometry cache is only invalidated where *we* move or resize a
+	 * window. A client that resizes itself lands here instead, so without
+	 * this the cache can hand back a stale rectangle for up to its TTL —
+	 * long enough for `query -T` and pointer hit-testing to disagree with
+	 * what is on screen. */
+	invalidate_geometry_cache(e->window);
 }
 
 void destroy_notify(void *evt)
@@ -606,10 +614,16 @@ void key_press(void *evt)
 
 	xcb_keysym_t keysym = xcb_key_symbols_get_keysym(cached_key_symbols, e->detail, 0);
 
-	/* Strip lock-key modifiers to match our KBMOD_* flags */
-	uint32_t modifiers = e->state & (BSP_MOD_MASK_SHIFT | BSP_MOD_MASK_CONTROL |
-	                                  BSP_MOD_MASK_1 | BSP_MOD_MASK_2 |
-	                                  BSP_MOD_MASK_3 | BSP_MOD_MASK_4 | BSP_MOD_MASK_5);
+	/* Strip the lock modifiers. `backend_grab_keys` deliberately grabs each
+	 * binding through every combination of Num/Caps/Scroll Lock, so the grab
+	 * fires with those bits set in `e->state`. Leaving them in makes the
+	 * lookup miss and the key is swallowed by the grab without running
+	 * anything. The masks come from `pointer_init` and are 0 when the
+	 * corresponding lock isn't mapped, so this is a no-op in that case. */
+	uint32_t modifiers = e->state & (uint16_t) ~(num_lock | caps_lock | scroll_lock);
+	modifiers &= (BSP_MOD_MASK_SHIFT | BSP_MOD_MASK_CONTROL |
+	              BSP_MOD_MASK_1 | BSP_MOD_MASK_2 |
+	              BSP_MOD_MASK_3 | BSP_MOD_MASK_4 | BSP_MOD_MASK_5);
 
 	const char *cmd = keybind_match(modifiers, keysym);
 	if (cmd) {
@@ -623,12 +637,38 @@ void process_error(void *evt)
 		return;
 		
 	xcb_request_error_t *e = (xcb_request_error_t *) evt;
-	
-	if (e->error_code == ERROR_CODE_BAD_WINDOW)
+
+	/* BadWindow is normally benign: it's the unavoidable race between a
+	 * client destroying a window and us still having requests in flight for
+	 * it. But swallowing it outright hides the case that matters — a node
+	 * that outlived its window, which makes every restack silently half-fail
+	 * with no diagnostic at all. So report it, rate-limited to keep a
+	 * genuinely racy moment from flooding the log, and say how many were
+	 * suppressed so the volume itself is visible. */
+	if (e->error_code == ERROR_CODE_BAD_WINDOW) {
+		static unsigned int bad_window_count;
+		static unsigned int bad_window_reported;
+		static uint32_t last_bad_window;
+
+		bad_window_count++;
+
+		/* Report the first few, then every power-of-two thereafter. */
+		bool novel = (e->bad_value != last_bad_window);
+		bool milestone = (bad_window_count & (bad_window_count - 1)) == 0;
+		last_bad_window = e->bad_value;
+
+		if (novel || milestone) {
+			warn("BadWindow on %s for 0x%08X (%u total, %u reported). "
+			     "If this repeats for one id, a node has outlived its "
+			     "window — try `bspc wm --prune-dead`.\n",
+			     xcb_event_get_request_label(e->major_opcode),
+			     e->bad_value, bad_window_count, ++bad_window_reported);
+		}
 		return;
-		
-	warn("Failed request: %s, %s: 0x%08X.\n", 
-	     xcb_event_get_request_label(e->major_opcode), 
-	     xcb_event_get_error_label(e->error_code), 
+	}
+
+	warn("Failed request: %s, %s: 0x%08X.\n",
+	     xcb_event_get_request_label(e->major_opcode),
+	     xcb_event_get_error_label(e->error_code),
 	     e->bad_value);
 }

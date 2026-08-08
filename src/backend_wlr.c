@@ -624,19 +624,41 @@ static void keyboard_key(struct wl_listener *listener, void *data)
 	/* Try keybinding interception on key press */
 	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		uint32_t modifiers = wlr_keyboard_get_modifiers(kb->wlr_keyboard);
+		xkb_keycode_t keycode = event->keycode + 8;
 
-		/* Translate keycode to keysym via xkb */
-		const xkb_keysym_t *syms;
-		int nsyms = xkb_state_key_get_syms(
-			kb->wlr_keyboard->xkb_state, event->keycode + 8, &syms);
+		/* Match against the *unshifted* keysyms for this key, i.e. shift
+		 * level 0 of the active layout. `xkb_state_key_get_syms` applies the
+		 * current shift level, so Shift+q yields `Q` and Shift+1 yields
+		 * `exclam`, neither of which can ever match what
+		 * `keybind_parse_combo` registered — it resolves names
+		 * case-insensitively and stores the lowercase form (`q`, `1`). The
+		 * X11 backend already matches on column 0 in `key_press`; this keeps
+		 * the two backends in agreement. */
+		const xkb_keysym_t *syms = NULL;
+		int nsyms = 0;
+		struct xkb_keymap *keymap = kb->wlr_keyboard->keymap;
+		if (keymap != NULL) {
+			xkb_layout_index_t layout = xkb_state_key_get_layout(
+				kb->wlr_keyboard->xkb_state, keycode);
+			if (layout != XKB_LAYOUT_INVALID) {
+				nsyms = xkb_keymap_key_get_syms_by_level(
+					keymap, keycode, layout, 0, &syms);
+			}
+		}
+		if (nsyms == 0) {
+			/* No keymap, or the key has no level-0 symbol. */
+			nsyms = xkb_state_key_get_syms(
+				kb->wlr_keyboard->xkb_state, keycode, &syms);
+		}
 
-		/* Map wlr modifiers to our KBMOD flags */
+		/* Map wlr modifiers to our KBMOD flags. Caps and Mod2 (Num Lock) are
+		 * locking modifiers: they are latched independently of what the user
+		 * is pressing, so folding them in would break every binding whenever
+		 * either lock happens to be on. */
 		uint32_t kbmod = 0;
 		if (modifiers & WLR_MODIFIER_SHIFT) kbmod |= KBMOD_SHIFT;
-		if (modifiers & WLR_MODIFIER_CAPS)  kbmod |= KBMOD_CAPS;
 		if (modifiers & WLR_MODIFIER_CTRL)  kbmod |= KBMOD_CTRL;
 		if (modifiers & WLR_MODIFIER_ALT)   kbmod |= KBMOD_ALT;
-		if (modifiers & WLR_MODIFIER_MOD2)  kbmod |= KBMOD_MOD2;
 		if (modifiers & WLR_MODIFIER_MOD3)  kbmod |= KBMOD_MOD3;
 		if (modifiers & WLR_MODIFIER_LOGO)  kbmod |= KBMOD_SUPER;
 		if (modifiers & WLR_MODIFIER_MOD5)  kbmod |= KBMOD_MOD5;

@@ -860,7 +860,10 @@ void backend_grab_keys(void)
 		}
 	}
 
-	uint16_t lock_masks[] = {
+	/* Any lock that isn't mapped comes back as 0, which collapses several of
+	 * these combinations onto each other. Grabbing the same (key, modifier)
+	 * twice is wasted round-trips, so keep only the distinct masks. */
+	uint16_t all_masks[] = {
 		0,
 		num_lock,
 		caps_lock,
@@ -870,6 +873,20 @@ void backend_grab_keys(void)
 		caps_lock | scroll_lock,
 		num_lock | caps_lock | scroll_lock,
 	};
+	uint16_t lock_masks[LENGTH(all_masks)];
+	size_t lock_mask_count = 0;
+	for (size_t i = 0; i < LENGTH(all_masks); i++) {
+		bool seen = false;
+		for (size_t j = 0; j < lock_mask_count; j++) {
+			if (lock_masks[j] == all_masks[i]) {
+				seen = true;
+				break;
+			}
+		}
+		if (!seen) {
+			lock_masks[lock_mask_count++] = all_masks[i];
+		}
+	}
 
 	/* KBMOD_* flags map directly to X11 modifier bits */
 	for (int i = 0; i < keybind_table.count; i++) {
@@ -882,7 +899,7 @@ void backend_grab_keys(void)
 		uint16_t modfield = (uint16_t)kb->modifiers;
 
 		for (xcb_keycode_t *kc = keycodes; *kc != XCB_NO_SYMBOL; kc++) {
-			for (size_t m = 0; m < sizeof(lock_masks) / sizeof(lock_masks[0]); m++) {
+			for (size_t m = 0; m < lock_mask_count; m++) {
 				xcb_grab_key(dpy, 1, root, modfield | lock_masks[m],
 				             *kc, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
 			}
