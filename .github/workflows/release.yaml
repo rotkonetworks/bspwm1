@@ -20,9 +20,15 @@ jobs:
     - name: Install dependencies
       run: |
         pacman -Syu --noconfirm base-devel libxcb xcb-util xcb-util-keysyms \
-          xcb-util-wm
+          xcb-util-wm libxkbcommon wayland xorg-server-xvfb
     - name: Build
       run: make
+    # Every tag from v1.2.3 to v1.2.10 produced no binaries: the build failed
+    # on a missing xkbcommon header and nothing here noticed, because the
+    # release step is what surfaces problems and it never ran. Run the suite
+    # so a broken tag fails loudly instead of silently shipping nothing.
+    - name: Test
+      run: make test
     - name: Strip binaries
       run: strip bspwm bspc
     - name: Release
