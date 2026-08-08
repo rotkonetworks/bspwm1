@@ -249,6 +249,15 @@ bool restore_state(const char *file_path)
 		}
 	}
 
+	/* The state file describes the tree as it was before the restart. Any
+	 * window that died in between is now a node pointing at a dead id, which
+	 * would silently corrupt every later restack. Reap them before we publish
+	 * client lists, so EWMH and the tree agree. */
+	unsigned int pruned = prune_dead_nodes();
+	if (pruned > 0) {
+		warn("restore_state: pruned %u node(s) whose windows are gone.\n", pruned);
+	}
+
 	ewmh_update_number_of_desktops();
 	ewmh_update_desktop_names();
 	ewmh_update_desktop_viewport();

@@ -126,6 +126,11 @@ bspwm_rect_t get_rectangle(monitor_t *m, desktop_t *d, node_t *n);
 void listen_enter_notify(node_t *n, bool enable);
 void regenerate_ids_in(node_t *n);
 
+/* Reap nodes whose window no longer exists; returns how many were removed.
+ * One X round-trip per client, so call it on restore or on demand, never
+ * from the event loop. */
+unsigned int prune_dead_nodes(void);
+
 unsigned int sticky_count(node_t *n);
 unsigned int private_count(node_t *n);
 unsigned int locked_count(node_t *n);

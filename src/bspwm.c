@@ -94,6 +94,40 @@ volatile sig_atomic_t running;
 volatile bool restart;
 bool randr;
 
+/* Copy the restart state file aside before it gets consumed and unlinked.
+ * Best-effort: a failure here must never affect startup, so every error path
+ * simply gives up quietly. */
+static void preserve_state_file(const char *state_path)
+{
+	char backup_path[MAXLEN];
+	int n = snprintf(backup_path, sizeof(backup_path), "%s.last", state_path);
+	if (n < 0 || (size_t) n >= sizeof(backup_path)) {
+		return;
+	}
+
+	FILE *src = fopen(state_path, "r");
+	if (src == NULL) {
+		return;
+	}
+
+	FILE *dst = fopen(backup_path, "w");
+	if (dst == NULL) {
+		fclose(src);
+		return;
+	}
+
+	char buf[BUFSIZ];
+	size_t got;
+	while ((got = fread(buf, 1, sizeof(buf), src)) > 0) {
+		if (fwrite(buf, 1, got, dst) != got) {
+			break;
+		}
+	}
+
+	fclose(dst);
+	fclose(src);
+}
+
 int main(int argc, char *argv[])
 {
 	char socket_path[MAXLEN];
@@ -158,6 +192,12 @@ int main(int argc, char *argv[])
 	setup();
 
 	if (state_path[0] != '\0') {
+		/* Keep a copy before consuming it. The state file is the only record
+		 * of what the tree looked like across a restart, and it is exactly
+		 * what you need to diagnose a restore that went wrong — but the
+		 * unlink below destroys it every time, so by the time anyone notices
+		 * a problem the evidence is already gone. */
+		preserve_state_file(state_path);
 		restore_state(state_path);
 		unlink(state_path);
 		adopt_orphans();
@@ -327,13 +367,28 @@ int main(int argc, char *argv[])
 	if (restart) {
 		char *host = NULL;
 		int dn = 0, sn = 0;
+		bool have_path = false;
 		if (backend_parse_display(&host, &dn, &sn)) {
 			snprintf(state_path, sizeof(state_path), STATE_PATH_TPL, host, dn, sn);
+			have_path = true;
 		}
 		free(host);
-		FILE *f = fopen(state_path, "w");
-		query_state(f);
-		fclose(f);
+
+		/* If we can't write the state, don't re-exec with -s pointing at a
+		 * file that isn't there: the new instance would come up with an empty
+		 * tree and every window would be orphaned. Better to exit and let the
+		 * session bring us back cleanly. (This also used to reach fclose(NULL)
+		 * and crash outright when fopen failed.) */
+		FILE *f = have_path ? fopen(state_path, "w") : NULL;
+		if (f == NULL) {
+			warn("Can't write the state file '%s'; cancelling restart.\n",
+			     have_path ? state_path : "<no display>");
+			restart = false;
+			exit_status = 1;
+		} else {
+			query_state(f);
+			fclose(f);
+		}
 	}
 
 	cleanup();

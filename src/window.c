@@ -189,6 +189,11 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	n->client = c;
 	initialize_client(n);
 
+	/* Distinguishes "the rule asked for center=on" from "we inferred it
+	 * because the window came up at 0,0". Only the latter should cascade —
+	 * see below. */
+	bool auto_centered = false;
+
 	if (csq->rect != NULL) {
 		c->floating_rectangle = *csq->rect;
 		free(csq->rect);
@@ -197,6 +202,7 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 		initialize_floating_rectangle(n);
 		if (c->floating_rectangle.x == 0 && c->floating_rectangle.y == 0) {
 			csq->center = true;
+			auto_centered = true;
 		}
 	}
 
@@ -208,7 +214,11 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 
 	if (csq->center) {
 		window_center(m, c);
-		if (cascade_offset > 0) {
+		/* Cascade only windows we centred on our own initiative. When a rule
+		 * says `center=on` the user asked for centred, and nudging it by
+		 * cascade_offset (20 by default) quietly breaks that for every such
+		 * rule — dialogs, pinentry, password prompts. */
+		if (auto_centered && cascade_offset > 0) {
 			int max_off = (int) (MIN(m->rectangle.width, m->rectangle.height) / 4);
 			unsigned int wrap = max_off > cascade_offset ? (unsigned int) (max_off / cascade_offset) : 1;
 			unsigned int idx = d->cascade_index % wrap;

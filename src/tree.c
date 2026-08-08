@@ -346,24 +346,58 @@ node_t *find_public(desktop_t *d)
 	return b_automatic ? b_automatic : b_manual;
 }
 
-bool window_ignores_tile_limits(bspwm_wid_t win)
+/* True when `effect` carries the exact key=value pair, tokenised the same way
+ * parse_keys_values does. A plain strstr() would also fire on a neighbouring
+ * key that merely ends with the same text (`xignore_tile_limits=on`). */
+static bool effect_has(const char *effect, const char *key, const char *value)
 {
-	if (!win) {
+	char buf[MAXLEN];
+	snprintf(buf, sizeof(buf), "%s", effect);
+
+	char *saveptr = NULL;
+	char *k = strtok_r(buf, CSQ_BLK, &saveptr);
+	while (k != NULL) {
+		char *v = strtok_r(NULL, CSQ_BLK, &saveptr);
+		if (v == NULL) {
+			break;
+		}
+		if (streq(k, key) && streq(v, value)) {
+			return true;
+		}
+		k = strtok_r(NULL, CSQ_BLK, &saveptr);
+	}
+
+	return false;
+}
+
+static bool node_ignores_tile_limits(node_t *n)
+{
+	if (n == NULL || n->client == NULL) {
 		return false;
 	}
 
-	char class_name[MAX_CLASS_NAME_LEN] = {0};
-	char instance_name[MAX_INSTANCE_NAME_LEN] = {0};
-
-	if (!backend_get_window_class(win, class_name, instance_name, sizeof(class_name))) {
-		return false;
-	}
+	/* The class and instance are already on the client by the time a node is
+	 * inserted, so there is no need to ask the server again — this used to
+	 * cost a synchronous round-trip on every tiled insert. */
+	const char *class_name = n->client->class_name;
+	const char *instance_name = n->client->instance_name;
 
 	for (rule_t *r = rule_head; r != NULL; r = r->next) {
-		if (streq(r->class_name, MATCH_ANY) || streq(class_name, r->class_name)) {
-			if (strstr(r->effect, "ignore_tile_limits=on") != NULL) {
-				return true;
-			}
+		/* Match all three fields the way apply_rules does. Testing the class
+		 * alone meant any rule with a wildcard class carrying this effect
+		 * silently switched tile limits off for every window. The window
+		 * title isn't known this early, so only title-agnostic rules count. */
+		if (!streq(r->class_name, MATCH_ANY) && !streq(r->class_name, class_name)) {
+			continue;
+		}
+		if (!streq(r->instance_name, MATCH_ANY) && !streq(r->instance_name, instance_name)) {
+			continue;
+		}
+		if (!streq(r->name, MATCH_ANY)) {
+			continue;
+		}
+		if (effect_has(r->effect, "ignore_tile_limits", "on")) {
+			return true;
 		}
 	}
 
@@ -376,33 +410,18 @@ static void count_tiled_nodes_iterative(node_t *root, int *count)
 		return;
 	}
 
-	node_t *stack[1024];
-	int stack_top = 0;
-
-	stack[stack_top++] = root;
-
-	while (stack_top > 0) {
-		if (stack_top >= 1024) {
-			break;
-		}
-
-		node_t *n = stack[--stack_top];
-		if (!n) {
-			continue;
-		}
-
-		if (n->client && !IS_FLOATING(n->client)) {
+	/* Walk the leaves directly instead of hand-rolling a bounded stack. The
+	 * old version pushed both children under a `stack_top < 1023` guard, so
+	 * on a deep enough tree the second push was skipped and an entire subtree
+	 * went uncounted — silently under-reporting the tile count and letting
+	 * the limit be exceeded. Only leaves carry a client, so this counts the
+	 * same set. */
+	for (node_t *f = first_extrema(root); f != NULL; f = next_leaf(f, root)) {
+		if (f->client && !IS_FLOATING(f->client)) {
 			if (*count >= INT_MAX - 1) {
 				break;
 			}
 			(*count)++;
-		}
-
-		if (n->second_child && stack_top < 1023) {
-			stack[stack_top++] = n->second_child;
-		}
-		if (n->first_child && stack_top < 1023) {
-			stack[stack_top++] = n->first_child;
 		}
 	}
 }
@@ -428,17 +447,21 @@ node_t *insert_node(monitor_t *m, desktop_t *d, node_t *n, node_t *f)
 		goto insert_node;
 	}
 
-	if (window_ignores_tile_limits(n->id)) {
+	if (node_ignores_tile_limits(n)) {
 		goto insert_node;
 	}
 
 	int current_tiles = count_tiled_windows(d);
 	if (current_tiles >= d->max_tiles_per_desktop) {
-		// Force window to be floating when tile limit is reached
-		// This keeps it managed by bspwm instead of becoming unmanaged
-		if (n->client) {
-			n->client->state = STATE_FLOATING;
-		}
+		/* Force the window floating once the desktop is full, so it stays
+		 * managed rather than being dropped. The node isn't in the tree yet,
+		 * so set_state() can't run here; mirror what it would have left
+		 * behind. `last_state` gives `node -t ~tiled` something to toggle
+		 * back to, and `vacant` keeps the window out of the tiling split
+		 * maths the way every other floating node is. */
+		n->client->state = STATE_FLOATING;
+		n->client->last_state = STATE_TILED;
+		n->vacant = true;
 		goto insert_node;
 	}
 
@@ -1261,6 +1284,60 @@ node_t *find_fence(node_t *n, direction_t dir)
 bool is_child(node_t *a, node_t *b)
 {
 	return a && b && a->parent && a->parent == b;
+}
+
+/* Remove any node whose window no longer exists on the server.
+ *
+ * A node is supposed to die with its window, via DestroyNotify/UnmapNotify.
+ * When that bookkeeping is missed the node lingers, and every subsequent
+ * restack issues stacking requests against a dead id. The server answers
+ * BadWindow, the whole restack silently half-completes, and the visible
+ * stacking order drifts out of sync with the tree with no other symptom.
+ * This sweep converts that permanent, silent corruption into a recoverable,
+ * logged event.
+ *
+ * Costs one round-trip per client, so this is deliberately not run from the
+ * event loop — only after a state restore and on explicit request.
+ *
+ * Returns the number of nodes reaped. */
+unsigned int prune_dead_nodes(void)
+{
+	if (clients_count == 0) {
+		return 0;
+	}
+
+	/* Collect before removing: unmanage_window mutates the trees we walk. */
+	uint32_t capacity = clients_count;
+	bspwm_wid_t *dead = safe_malloc_array(capacity, sizeof(bspwm_wid_t));
+	if (dead == NULL) {
+		warn("prune_dead_nodes: allocation failed.\n");
+		return 0;
+	}
+
+	uint32_t count = 0;
+	for (monitor_t *m = mon_head; m != NULL && count < capacity; m = m->next) {
+		for (desktop_t *d = m->desk_head; d != NULL && count < capacity; d = d->next) {
+			for (node_t *f = first_extrema(d->root); f != NULL; f = next_leaf(f, d->root)) {
+				if (f->client == NULL) {
+					continue;
+				}
+				if (count >= capacity) {
+					break;
+				}
+				if (!window_exists(f->id)) {
+					dead[count++] = f->id;
+				}
+			}
+		}
+	}
+
+	for (uint32_t i = 0; i < count; i++) {
+		warn("prune: 0x%08X outlived its window, removing the stale node.\n", dead[i]);
+		unmanage_window(dead[i]);
+	}
+
+	free(dead);
+	return count;
 }
 
 bool is_descendant(node_t *a, node_t *b)
