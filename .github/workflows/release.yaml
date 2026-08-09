@@ -9,20 +9,30 @@ on:
         description: 'tag to release'
         required: true
         type: string
+
+# The release step needs to create the release and upload assets. Spelling it
+# out means the job keeps working if the org default token permission is ever
+# tightened to read-only, instead of failing at the last step of a green build.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         ref: ${{ inputs.tag || github.ref }}
+        # `make` derives VERSION from `git describe --tags`, which needs the
+        # tags and enough history to reach one.
+        fetch-depth: 0
     - name: Install dependencies
       run: |
         # xorg-fonts-misc supplies the -misc-fixed- bitmap font that
         # tests/test_window.c opens to label its window; without it the helper
         # exits and every window-management test sees an empty tree.
-        pacman -Syu --noconfirm base-devel libxcb xcb-util xcb-util-keysyms \
+        pacman -Syu --noconfirm base-devel git libxcb xcb-util xcb-util-keysyms \
           xcb-util-wm libxkbcommon wayland xorg-server-xvfb xorg-fonts-misc
     - name: Build
       run: make
@@ -34,10 +44,19 @@ jobs:
       run: make test
     - name: Strip binaries
       run: strip bspwm bspc
+    - name: Report version and checksums
+      run: |
+        ./bspwm -v
+        sha256sum bspwm bspc | tee sha256sums.txt
     - name: Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ inputs.tag || github.ref_name }}
+        # Without this a missing artefact is uploaded as "nothing" and the job
+        # still goes green -- the same silent failure mode that hid the broken
+        # builds for eight releases.
+        fail_on_unmatched_files: true
         files: |
           bspwm
           bspc
+          sha256sums.txt
