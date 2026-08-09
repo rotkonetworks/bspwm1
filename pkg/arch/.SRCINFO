@@ -14,7 +14,7 @@ pkgbase = bspwm1
 	optdepends = sxhkd: keybinding daemon
 	provides = bspwm
 	conflicts = bspwm
-	source = git+https://github.com/rotkonetworks/bspwm1.git#branch=master
+	source = git+https://github.com/rotkonetworks/bspwm1.git#tag=v1.3.1
 	sha256sums = SKIP
 
 pkgname = bspwm1
