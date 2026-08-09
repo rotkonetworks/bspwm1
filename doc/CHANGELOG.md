@@ -1,3 +1,25 @@
+# v1.4.0
+
+### Changed
+
+- **A tiled client is now always in the normal layer.** A non-normal layer does
+  nothing while a window is tiled -- tiled windows don't overlap -- but in
+  monocle every tiled node is given the full area, and there the layer
+  outranks focus. A tiled window left in `above` covers the focused window
+  permanently and can't be reached, and since the layer is saved in the state
+  file it survives every restart, so a single stray `bspc node -l above` was
+  effectively permanent.
+
+  `bspc node -l above|below` on a tiled window is now an error that says why,
+  instead of a silent no-op. Tiling a floating window drops its layer, and
+  rules, `_NET_WM_STATE_ABOVE` from a client, and restored state files are all
+  normalised on the way in. Nothing advertises a layer that isn't in effect,
+  including the EWMH property and `bspc query`.
+
+  This diverges from upstream, which treats layer and state as orthogonal.
+  Floating -> tiled -> floating no longer restores the previous layer; set it
+  again after floating.
+
 # v1.3.1
 
 ### Fixed
