@@ -277,11 +277,22 @@ if [ -f "$TEST_CLIENT" ]; then
 	assert_ok "back to tiled" $BSPC node -t tiled
 
 	# -- Layer changes --
+	# A tiled client is always LAYER_NORMAL: a non-normal layer does nothing
+	# while tiling, then decides what you see in monocle, where it outranks
+	# focus and covers the focused window unreachably. So the layer only
+	# applies to windows that are not part of the layout.
+	assert_fail "layer above refused while tiled" $BSPC node -l above
+	LAYER=$($BSPC query -T -n focused 2>/dev/null | grep -o '"layer":"[^"]*"' | head -1)
+	assert_eq "tiled node stays normal" '"layer":"normal"' "$LAYER"
+
+	assert_ok "float it" $BSPC node -t floating
 	assert_ok "set layer above" $BSPC node -l above
 	LAYER=$($BSPC query -T -n focused 2>/dev/null | grep -o '"layer":"[^"]*"' | head -1)
-	assert_eq "node layer is above" '"layer":"above"' "$LAYER"
+	assert_eq "floating node layer is above" '"layer":"above"' "$LAYER"
 
-	assert_ok "set layer normal" $BSPC node -l normal
+	assert_ok "back to tiled drops the layer" $BSPC node -t tiled
+	LAYER=$($BSPC query -T -n focused 2>/dev/null | grep -o '"layer":"[^"]*"' | head -1)
+	assert_eq "layer normalised on tiling" '"layer":"normal"' "$LAYER"
 
 	# -- Flags --
 	assert_ok "set sticky" $BSPC node -g sticky=on

@@ -2362,9 +2362,63 @@ void propagate_vacant_upward(monitor_t *m, desktop_t *d, node_t *n)
 	propagate_vacant_upward_bounded(m, d, n, 0);
 }
 
+/* A tiled client owns its own rectangle and never overlaps a sibling, so a
+ * non-normal layer does nothing at all -- right up until the desktop switches
+ * to monocle. There every tiled node is handed the full area and they overlap
+ * completely, so `stack_level` decides what you see, and layer outranks focus.
+ * A tiled window left in LAYER_ABOVE then covers the focused window
+ * permanently and cannot be reached.
+ *
+ * The state is therefore invisible exactly where it is set and harmful
+ * somewhere else entirely, and it survives a restart, so one stray keypress is
+ * permanent until it is explicitly undone.
+ *
+ * `neutralize_occluding_windows` is the existing guard against "you focused a
+ * window and something else is covering it", but it only demotes occluding
+ * *fullscreen* windows -- deliberately, because a floating always-on-top
+ * window covering part of the screen is the entire point of the feature, and
+ * demoting it on every focus change would be wrong.
+ *
+ * So rather than let stacking silently disagree with the recorded layer, keep
+ * the combination out of the model: a tiled client is always LAYER_NORMAL.
+ * That is enforced here and at every other site that can assign a layer,
+ * because `set_layer` is not the only one -- manage_window and restore_state
+ * both write `client->layer` directly. */
+bool layer_allowed(const client_t *c, stack_layer_t l)
+{
+	return c == NULL || l == LAYER_NORMAL || !IS_TILED(c);
+}
+
+/* Force a tiled client back to LAYER_NORMAL. Announces the change the same way
+ * set_layer does, so subscribers and the EWMH property stay truthful -- the
+ * point of the invariant is that nothing advertises a layer we don't honour. */
+void enforce_layer_invariant(monitor_t *m, desktop_t *d, node_t *n)
+{
+	if (n == NULL || n->client == NULL || layer_allowed(n->client, n->client->layer)) {
+		return;
+	}
+
+	n->client->last_layer = LAYER_NORMAL;
+	n->client->layer = LAYER_NORMAL;
+	n->client->wm_flags &= ~(WM_FLAG_ABOVE | WM_FLAG_BELOW);
+
+	ewmh_wm_state_update(n);
+
+	if (m && d) {
+		put_status(SBSC_MASK_NODE_LAYER, "node_layer 0x%08X 0x%08X 0x%08X %s\n",
+		           m->id, d->id, n->id, LAYER_STR(LAYER_NORMAL));
+	}
+}
+
 bool set_layer(monitor_t *m, desktop_t *d, node_t *n, stack_layer_t l)
 {
 	if (!n || !n->client || n->client->layer == l) {
+		return false;
+	}
+
+	/* Refuse rather than accept-and-ignore: a caller that asked for `above`
+	 * gets told no, instead of reading back a layer the window doesn't have. */
+	if (!layer_allowed(n->client, l)) {
 		return false;
 	}
 
@@ -2456,6 +2510,12 @@ bool set_state(monitor_t *m, desktop_t *d, node_t *n, client_state_t s)
 			set_layout(m, d, d->user_layout, false);
 		}
 	}
+
+	/* Becoming tiled drops any non-normal layer. Tiling the window is the
+	 * user handing its placement to the layout, so carrying a hidden
+	 * always-on-top along for the ride -- to surface later in monocle -- is
+	 * the behaviour this invariant exists to prevent. */
+	enforce_layer_invariant(m, d, n);
 
 	return true;
 }

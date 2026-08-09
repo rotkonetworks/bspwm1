@@ -303,6 +303,15 @@ void cmd_node(char **args, int num, FILE *rsp)
 			}
 			stack_layer_t lyr;
 			if (parse_stack_layer(*args, &lyr)) {
+				/* Say why. A tiled window can't hold a non-normal layer, and
+				 * silently doing nothing here is how one ends up wondering
+				 * why "always on top" had no effect. */
+				if (trg.node != NULL && trg.node->client != NULL &&
+				    !layer_allowed(trg.node->client, lyr)) {
+					fail(rsp, "node %s: '%s' applies to floating windows; "
+					          "this one is tiled.\n", *(args - 1), *args);
+					break;
+				}
 				if (!set_layer(trg.monitor, trg.desktop, trg.node, lyr)) {
 					fail(rsp, "%s", "");
 					break;

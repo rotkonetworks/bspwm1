@@ -104,6 +104,9 @@ void set_vacant(monitor_t *m, desktop_t *d, node_t *n, bool value);
 void set_vacant_local(monitor_t *m, desktop_t *d, node_t *n, bool value);
 void propagate_vacant_downward(monitor_t *m, desktop_t *d, node_t *n, bool value);
 void propagate_vacant_upward(monitor_t *m, desktop_t *d, node_t *n);
+/* A tiled client is always LAYER_NORMAL; see the comment on layer_allowed. */
+bool layer_allowed(const client_t *c, stack_layer_t l);
+void enforce_layer_invariant(monitor_t *m, desktop_t *d, node_t *n);
 bool set_layer(monitor_t *m, desktop_t *d, node_t *n, stack_layer_t l);
 bool set_state(monitor_t *m, desktop_t *d, node_t *n, client_state_t s);
 void set_floating(monitor_t *m, desktop_t *d, node_t *n, bool value);

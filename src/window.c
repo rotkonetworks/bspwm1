@@ -307,6 +307,12 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 		set_state(m, d, n, *(csq->state));
 	}
 
+	/* Both assignments above write client->layer directly, so they bypass the
+	 * check in set_layer. A rule saying `layer=above` without also floating
+	 * the window, or a client mapping with _NET_WM_STATE_ABOVE already set,
+	 * would otherwise install a tiled above-layer window at map time. */
+	enforce_layer_invariant(m, d, n);
+
 	if (csq->honor_size_hints != HONOR_SIZE_HINTS_DEFAULT) {
 		c->honor_size_hints = csq->honor_size_hints;
 	}

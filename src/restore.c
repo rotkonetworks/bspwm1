@@ -258,6 +258,23 @@ bool restore_state(const char *file_path)
 		warn("restore_state: pruned %u node(s) whose windows are gone.\n", pruned);
 	}
 
+	/* State files written before the layer invariant existed can carry a tiled
+	 * client in LAYER_ABOVE, and layer survives every restart, so without this
+	 * sweep such a window stays wedged on top forever. Normalise on the way
+	 * in. */
+	for (monitor_t *m = mon_head; m != NULL; m = m->next) {
+		for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
+			for (node_t *f = first_extrema(d->root); f != NULL; f = next_leaf(f, d->root)) {
+				if (f->client != NULL && !layer_allowed(f->client, f->client->layer)) {
+					warn("restore_state: 0x%08X was tiled in the %s layer; "
+					     "resetting to normal.\n",
+					     f->id, LAYER_STR(f->client->layer));
+					enforce_layer_invariant(m, d, f);
+				}
+			}
+		}
+	}
+
 	ewmh_update_number_of_desktops();
 	ewmh_update_desktop_names();
 	ewmh_update_desktop_viewport();
