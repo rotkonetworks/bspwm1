@@ -49,7 +49,7 @@ jobs:
         ./bspwm -v
         sha256sum bspwm bspc | tee sha256sums.txt
     - name: Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ inputs.tag || github.ref_name }}
         # Without this a missing artefact is uploaded as "nothing" and the job
