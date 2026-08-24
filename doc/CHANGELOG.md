@@ -1,3 +1,50 @@
+# v1.5.0
+
+Merged nine commits from Lorenzo Leonini's fork
+(https://github.com/lleonini/bspwm1), which is based on this one. Reviewed
+individually; each bug was confirmed present here before taking the fix.
+Authorship is preserved on every commit.
+
+### New
+
+- `ignore_monitor_updates` setting and the `-i` command line flag freeze the
+  monitor layout after the initial startup detection, for setups where a
+  display or KVM switch reports spurious hotplugs. Note that enabling it makes
+  `remove_disabled_monitors` and `remove_unplugged_monitors` ineffective, since
+  the events they act on are never processed. (Lorenzo Leonini)
+
+### Fixed
+
+- **Desktop and monitor selectors matched internal ids before names.** Ids are
+  small sequential integers, so a desktop or monitor with a numeric name was
+  shadowed by an unrelated one holding that internal id. With desktops named
+  `1 2 3` (internal ids `2 3 4`), `bspc desktop -f 3` focused the desktop named
+  `2`. Names are now matched first. (Lorenzo Leonini)
+- **Crashes and permanent focus loss from a stale focused monitor.** `mon` was
+  only ever reassigned by add_monitor, unlink_monitor and focus_node, and
+  nothing repaired it when it went stale -- a monitor can go unwired without
+  being removed, and a state restore whose focused-monitor id no longer
+  resolves leaves it NULL. Most focus and EWMH code dereferences `mon->desk`
+  unchecked. Adds `ensure_focused_monitor()`, called from the chokepoints that
+  rely on `mon`, plus NULL guards in activate_node, swap_nodes, transfer_node,
+  circulate_leaves, update_motion_recorder, update_input_focus and
+  ewmh_update_active_window. (Lorenzo Leonini)
+- Focus now moves to a wired monitor when the focused one goes unwired without
+  being removed; previously new windows and unqualified commands were
+  misdirected to a monitor that wasn't displayed anywhere. (Lorenzo Leonini)
+- **`desktop_t.urgent_count` went permanently out of sync.** Only `set_urgent`
+  ever adjusted it, so closing an urgent window, moving it to another desktop,
+  or swapping it across desktops left the source desktop marked urgent
+  forever. (Lorenzo Leonini)
+- **Floating windows shifted by `border_width` on the next arrange.**
+  `configure_request` stored the client's requested position unadjusted but
+  placed the border-adjusted one, while `floating_rectangle` is the X window
+  origin everywhere else, so the next `arrange()` moved the window. (Lorenzo
+  Leonini)
+- `ewmh_update_current_desktop` published desktop index 0 when there was no
+  focused desktop, instead of leaving the property alone. (Lorenzo Leonini)
+- Grammar in the manual's stacking-layers section. (jackson-carroll)
+
 # v1.4.0
 
 ### Changed
