@@ -2,12 +2,12 @@
 .\"     Title: bspwm
 .\"    Author: [see the "Author" section]
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: 08/09/2026
+.\"      Date: 08/24/2026
 .\"    Manual: Bspwm Manual
-.\"    Source: Bspwm v1.3.0
+.\"    Source: Bspwm v1.4.0-9-gb25f2ac
 .\"  Language: English
 .\"
-.TH "BSPWM" "1" "08/09/2026" "Bspwm v1\&.3\&.0" "Bspwm Manual"
+.TH "BSPWM" "1" "08/24/2026" "Bspwm v1\&.4\&.0\-9\-gb25f2ac" "Bspwm Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -1509,6 +1509,18 @@ Center pseudo tiled windows into their tiling rectangles\&. Defaults to
 Consider disabled monitors as disconnected\&.
 .RE
 .PP
+\fIignore_monitor_updates\fR
+.RS 4
+Ignore monitor updates (RandR or wlroots output hotplug events) after the initial startup detection, freezing the monitor layout\&. Useful where a display or KVM switch reports spurious hotplugs\&. Note that this makes
+\fIremove_disabled_monitors\fR
+and
+\fIremove_unplugged_monitors\fR
+ineffective, since the events they act on are never processed\&. Can also be enabled from the start with the
+\fB\-i\fR
+command line option\&. Defaults to
+\fBfalse\fR\&.
+.RE
+.PP
 \fIremove_unplugged_monitors\fR
 .RS 4
 Remove unplugged monitors\&.
@@ -1517,12 +1529,6 @@ Remove unplugged monitors\&.
 \fImerge_overlapping_monitors\fR
 .RS 4
 Merge overlapping monitors (the bigger remains)\&.
-.RE
-.PP
-\fIignore_monitor_updates\fR
-.RS 4
-Ignore all monitor updates (RandR/output hotplug events) after the initial startup detection\&. Can also be enabled from the start with the \fB\-i\fR command line option\&. Defaults to
-\fIfalse\fR\&.
 .RE
 .SS "Monitor and Desktop Settings"
 .PP

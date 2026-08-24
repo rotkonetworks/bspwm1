@@ -13,7 +13,7 @@ bspwm - Binary space partitioning window manager
 Synopsis
 --------
 
-*bspwm* [*-h*|*-v*|*-c* 'CONFIG_PATH']
+*bspwm* [*-h*|*-v*|*-c* 'CONFIG_PATH'|*-i*]
 
 *bspc --print-socket-path*
 
@@ -40,6 +40,9 @@ Options
 
 *-c* 'CONFIG_PATH'::
 	Use the given configuration file.
+
+*-i*::
+	Ignore all monitor updates after the initial startup detection. Equivalent to starting with the 'ignore_monitor_updates' setting already enabled.
 
 *--print-socket-path*::
     Print the *bspwm* socket path and exit.
@@ -853,6 +856,9 @@ Global Settings
 
 'remove_disabled_monitors'::
 	Consider disabled monitors as disconnected.
+
+'ignore_monitor_updates'::
+	Ignore monitor updates (RandR or wlroots output hotplug events) after the initial startup detection, freezing the monitor layout. Useful where a display or KVM switch reports spurious hotplugs. Note that this makes 'remove_disabled_monitors' and 'remove_unplugged_monitors' ineffective, since the events they act on are never processed. Can also be enabled from the start with the *-i* command line option. Defaults to *false*.
 
 'remove_unplugged_monitors'::
 	Remove unplugged monitors.
