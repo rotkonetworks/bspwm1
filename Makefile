@@ -21,14 +21,33 @@ ifeq ($(BACKEND),x11)
     SESSION_FILE = contrib/freedesktop/bspwm.desktop
     SESSION_DIR  = $(XSESSIONS)
 else ifeq ($(BACKEND),wlroots)
-    WLROOTS_DIR ?= ../wlroots
     WM_BIN       = bspwm-wl
     BACKEND_SRC  = backend_wlr.c window_ops.c
-    BACKEND_LIBS = -L$(WLROOTS_DIR)/build -lwlroots-0.21 $(shell pkg-config --libs wayland-server xkbcommon 2>/dev/null)
     CPPFLAGS += -DBACKEND_WLROOTS -DWLR_USE_UNSTABLE
-    CFLAGS += -I$(WLROOTS_DIR)/include -I$(WLROOTS_DIR)/build/include -I$(WLROOTS_DIR)/build/protocol $(shell pkg-config --cflags wayland-server libdrm pixman-1 xkbcommon 2>/dev/null)
     SESSION_FILE = contrib/freedesktop/bspwm-wayland.desktop
     SESSION_DIR  = $(WLSESSIONS)
+    # Default: the distro's wlroots via pkg-config (Arch: wlroots0.20).
+    # Set WLROOTS_DIR to a source checkout to build against its build/ dir
+    # instead, e.g. for a wlroots-git development tree.
+    WLROOTS_PC  ?= wlroots-0.20
+    ifdef WLROOTS_DIR
+        BACKEND_LIBS = -L$(WLROOTS_DIR)/build -lwlroots-$(WLROOTS_ABI)
+        WLROOTS_ABI ?= 0.21
+        CFLAGS += -I$(WLROOTS_DIR)/include -I$(WLROOTS_DIR)/build/include -I$(WLROOTS_DIR)/build/protocol
+    else
+        BACKEND_LIBS = $(shell pkg-config --libs $(WLROOTS_PC))
+        CFLAGS += $(shell pkg-config --cflags $(WLROOTS_PC))
+    endif
+    BACKEND_LIBS += $(shell pkg-config --libs wayland-server xkbcommon 2>/dev/null)
+    CFLAGS += $(shell pkg-config --cflags wayland-server libdrm pixman-1 xkbcommon 2>/dev/null)
+    # wlroots' public headers include generated protocol headers that the
+    # compositor is expected to produce itself (wayland-protocols and
+    # wlr-protocols XML through wayland-scanner).
+    PROTO_DIR  = build/$(BACKEND)/protocol
+    PROTO_HDRS = $(PROTO_DIR)/wlr-layer-shell-unstable-v1-protocol.h \
+                 $(PROTO_DIR)/wlr-output-power-management-unstable-v1-protocol.h
+    CFLAGS += -I$(PROTO_DIR)
+    WLR_PROTOCOLS_DIR ?= $(shell pkg-config --variable=pkgdatadir wlr-protocols 2>/dev/null || echo /usr/share/wlr-protocols)
 else
     $(error Unknown BACKEND=$(BACKEND). Use x11 or wlroots)
 endif
@@ -66,7 +85,11 @@ all: $(WM_BIN) bspc
 debug: CFLAGS += -O0 -g
 debug: $(WM_BIN) bspc
 
-$(OBJDIR)/%.o: src/%.c Makefile
+$(PROTO_DIR)/%-protocol.h: $(WLR_PROTOCOLS_DIR)/unstable/%.xml
+	@mkdir -p $(PROTO_DIR)
+	wayland-scanner server-header $< $@
+
+$(OBJDIR)/%.o: src/%.c Makefile $(PROTO_HDRS)
 	@mkdir -p $(OBJDIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c -o $@ $<
 
