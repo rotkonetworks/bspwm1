@@ -57,11 +57,19 @@ CPU cycle microbenchmarks exist in `benches/microbench.c` but are UX-irrelevant.
 ## build
 
 ```bash
-make
-make install
+make                  # X11 backend -> bspwm
+make install          # installs bspwm, bspc and the xsessions entry
 ```
 
-dependencies: libxcb, xcb-util, xcb-util-keysyms, xcb-util-wm
+```bash
+make BACKEND=wlroots WLROOTS_DIR=../wlroots   # Wayland compositor -> bspwm-wl
+make BACKEND=wlroots install                  # installs bspwm-wl, bspc and the wayland-sessions entry
+```
+
+each backend is a separate build and a separate binary. objects go under `build/<backend>/`, so the two can be built and installed side by side. `bspc` is shared and links no display library. the wayland build has no sxhkd: keybindings are handled in-process via `bspc keybind`. github releases and the aur package build the X11 backend only.
+
+dependencies (x11): libxcb, xcb-util, xcb-util-keysyms, xcb-util-wm, libxkbcommon
+dependencies (wlroots): a wlroots 0.21 checkout at `WLROOTS_DIR`, wayland-server, libxkbcommon, pixman, libdrm
 
 binary size: 285KB (+34KB / +13% vs upstream 0.9.12)
 

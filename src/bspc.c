@@ -32,13 +32,51 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <limits.h>
-#include <xcb/xcb.h>
 #include <errno.h>
 #include "helpers.h"
 #include "common.h"
 
 #define MAX_ARGS 1024
 #define MSG_CHUNK_SIZE 4096
+
+/* Parse an X11 display string ("[protocol/][host]:display[.screen]") the
+ * way xcb_parse_display does for the socket path, without linking libxcb:
+ * the client should not need X libraries on a Wayland-only system. */
+static bool parse_display(const char *name, char **host, int *display_num, int *screen_num)
+{
+	const char *slash = strrchr(name, '/');
+	if (slash != NULL) {
+		name = slash + 1;
+	}
+	const char *colon = strrchr(name, ':');
+	if (colon == NULL) {
+		return false;
+	}
+	char *end;
+	errno = 0;
+	long dn = strtol(colon + 1, &end, 10);
+	if (end == colon + 1 || errno != 0 || dn < 0 || dn > INT_MAX) {
+		return false;
+	}
+	long sn = 0;
+	if (*end == '.') {
+		const char *sp = end + 1;
+		sn = strtol(sp, &end, 10);
+		if (end == sp || errno != 0 || sn < 0 || sn > INT_MAX) {
+			return false;
+		}
+	}
+	if (*end != '\0') {
+		return false;
+	}
+	*host = strndup(name, (size_t)(colon - name));
+	if (*host == NULL) {
+		return false;
+	}
+	*display_num = (int)dn;
+	*screen_num = (int)sn;
+	return true;
+}
 
 int main(int argc, char *argv[])
 {
@@ -73,7 +111,8 @@ int main(int argc, char *argv[])
 		bool found = false;
 
 		/* Try X11 display first */
-		if (getenv("DISPLAY") && xcb_parse_display(NULL, &host, &dn, &sn) != 0) {
+		char *display = getenv("DISPLAY");
+		if (display != NULL && parse_display(display, &host, &dn, &sn)) {
 			found = true;
 		}
 

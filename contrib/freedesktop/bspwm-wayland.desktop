@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=bspwm (Wayland)
 Comment=Binary space partitioning window manager (Wayland compositor)
-Exec=bspwm
+Exec=bspwm-wl
 Type=Application
 DesktopNames=bspwm

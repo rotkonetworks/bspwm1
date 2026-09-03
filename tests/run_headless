@@ -8,7 +8,9 @@
 set -e
 
 BACKEND="${1:-x11}"
+# The X11 build is bspwm, the wlroots compositor is bspwm-wl.
 BSPWM="../bspwm"
+[ "$BACKEND" = "wlroots" ] && BSPWM="../bspwm-wl"
 BSPC="../bspc"
 PASS=0
 FAIL=0
@@ -46,18 +48,18 @@ if [ "$BACKEND" = "x11" ]; then
 	sleep 0.5
 
 	if ! kill -0 "$XVFB_PID" 2>/dev/null; then
-		echo "${RED}FAIL: Xvfb failed to start${NC}"
+		printf "%b\n" "${RED}FAIL: Xvfb failed to start${NC}"
 		exit 1
 	fi
 
-	echo "${YELLOW}=== Testing X11 backend on ${DISPLAY} ===${NC}"
+	printf "%b\n" "${YELLOW}=== Testing X11 backend on ${DISPLAY} ===${NC}"
 elif [ "$BACKEND" = "wlroots" ]; then
 	export WLR_BACKENDS=headless
 	export WLR_RENDERER=pixman
 	export WLR_HEADLESS_OUTPUTS=1
 	# No DISPLAY needed — bspwm sets WAYLAND_DISPLAY itself
 	unset DISPLAY
-	echo "${YELLOW}=== Testing wlroots backend (headless) ===${NC}"
+	printf "%b\n" "${YELLOW}=== Testing wlroots backend (headless) ===${NC}"
 else
 	echo "Usage: $0 [x11|wlroots]"
 	exit 1
@@ -70,7 +72,7 @@ BSPWM_PID=$!
 sleep 2
 
 if ! kill -0 "$BSPWM_PID" 2>/dev/null; then
-	echo "${RED}FAIL: bspwm failed to start${NC}"
+	printf "%b\n" "${RED}FAIL: bspwm failed to start${NC}"
 	exit 1
 fi
 
@@ -89,10 +91,10 @@ assert_eq() {
 	local desc="$1" expected="$2" actual="$3"
 	TESTS_RUN=$((TESTS_RUN + 1))
 	if [ "$expected" = "$actual" ]; then
-		echo "  ${GREEN}PASS${NC}: $desc"
+		printf "%b\n" "  ${GREEN}PASS${NC}: $desc"
 		PASS=$((PASS + 1))
 	else
-		echo "  ${RED}FAIL${NC}: $desc"
+		printf "%b\n" "  ${RED}FAIL${NC}: $desc"
 		echo "    expected: '$expected'"
 		echo "    actual:   '$actual'"
 		FAIL=$((FAIL + 1))
@@ -103,10 +105,10 @@ assert_not_empty() {
 	local desc="$1" actual="$2"
 	TESTS_RUN=$((TESTS_RUN + 1))
 	if [ -n "$actual" ]; then
-		echo "  ${GREEN}PASS${NC}: $desc"
+		printf "%b\n" "  ${GREEN}PASS${NC}: $desc"
 		PASS=$((PASS + 1))
 	else
-		echo "  ${RED}FAIL${NC}: $desc (empty)"
+		printf "%b\n" "  ${RED}FAIL${NC}: $desc (empty)"
 		FAIL=$((FAIL + 1))
 	fi
 }
@@ -116,10 +118,10 @@ assert_ok() {
 	shift
 	TESTS_RUN=$((TESTS_RUN + 1))
 	if "$@" >/dev/null 2>&1; then
-		echo "  ${GREEN}PASS${NC}: $desc"
+		printf "%b\n" "  ${GREEN}PASS${NC}: $desc"
 		PASS=$((PASS + 1))
 	else
-		echo "  ${RED}FAIL${NC}: $desc (exit code $?)"
+		printf "%b\n" "  ${RED}FAIL${NC}: $desc (exit code $?)"
 		FAIL=$((FAIL + 1))
 	fi
 }
@@ -129,10 +131,10 @@ assert_fail() {
 	shift
 	TESTS_RUN=$((TESTS_RUN + 1))
 	if ! "$@" >/dev/null 2>&1; then
-		echo "  ${GREEN}PASS${NC}: $desc"
+		printf "%b\n" "  ${GREEN}PASS${NC}: $desc"
 		PASS=$((PASS + 1))
 	else
-		echo "  ${RED}FAIL${NC}: $desc (expected failure, got success)"
+		printf "%b\n" "  ${RED}FAIL${NC}: $desc (expected failure, got success)"
 		FAIL=$((FAIL + 1))
 	fi
 }
@@ -256,7 +258,7 @@ if [ -f "$TEST_CLIENT" ]; then
 	assert_ok "focus next" $BSPC node -f next.local.leaf
 	FOCUSED2=$($BSPC query -N -n focused 2>/dev/null)
 	# After focus next, focused node should change (if 2 windows exist)
-	if [ "$NODES_AFTER2" -ge 2 ]; then
+	if [ "$LEAVES_AFTER2" -ge 2 ]; then
 		# We can't guarantee different on all layouts but at least it shouldn't crash
 		assert_not_empty "focus next returns a node" "$FOCUSED2"
 	fi
@@ -320,7 +322,7 @@ if [ -f "$TEST_CLIENT" ]; then
 	wait "$TW1_PID" 2>/dev/null || true
 	wait "$TW2_PID" 2>/dev/null || true
 else
-	echo "  ${YELLOW}SKIP${NC}: $TEST_CLIENT not built (run 'make' in tests/)"
+	printf "%b\n" "  ${YELLOW}SKIP${NC}: $TEST_CLIENT not built (run 'make' in tests/)"
 fi
 
 echo ""
@@ -391,10 +393,10 @@ echo "== Shutdown =="
 assert_ok "bspc quit" $BSPC quit
 sleep 0.5
 if kill -0 "$BSPWM_PID" 2>/dev/null; then
-	echo "  ${RED}FAIL${NC}: bspwm still running after quit"
+	printf "%b\n" "  ${RED}FAIL${NC}: bspwm still running after quit"
 	FAIL=$((FAIL + 1))
 else
-	echo "  ${GREEN}PASS${NC}: bspwm exited cleanly"
+	printf "%b\n" "  ${GREEN}PASS${NC}: bspwm exited cleanly"
 	PASS=$((PASS + 1))
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
@@ -406,9 +408,9 @@ echo ""
 echo "================================="
 TOTAL=$((PASS + FAIL))
 if [ "$FAIL" -eq 0 ]; then
-	echo "${GREEN}ALL GREEN: ${PASS}/${TOTAL} tests passed${NC} (${BACKEND})"
+	printf "%b\n" "${GREEN}ALL GREEN: ${PASS}/${TOTAL} tests passed${NC} (${BACKEND})"
 else
-	echo "${RED}RED: ${FAIL} failures, ${PASS} passed out of ${TOTAL}${NC} (${BACKEND})"
+	printf "%b\n" "${RED}RED: ${FAIL} failures, ${PASS} passed out of ${TOTAL}${NC} (${BACKEND})"
 fi
 echo "================================="
 

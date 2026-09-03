@@ -9,17 +9,26 @@ CFLAGS   += -std=c23 -pedantic -Wall -Wextra -Wvla -Wformat=2 -Wformat-overflow=
 CORE_SRC = bspwm.c helpers.c geometry.c jsmn.c settings.c monitor.c desktop.c tree.c stack.c history.c \
 	 messages.c parse.c query.c restore.c rule.c subscribe.c keybind.c snap.c
 
-# Backend selection
+# Backend selection. Each backend is a separate build with its own binary
+# name, object directory and session file: the X11 build is `bspwm`, the
+# wlroots compositor is `bspwm-wl`. They never share a process, and they can
+# be installed side by side.
 ifeq ($(BACKEND),x11)
-    BACKEND_SRC = backend_x11.c events.c pointer.c window.c ewmh.c
+    WM_BIN       = bspwm
+    BACKEND_SRC  = backend_x11.c events.c pointer.c window.c ewmh.c
     BACKEND_LIBS = -lxcb -lxcb-util -lxcb-keysyms -lxcb-icccm -lxcb-ewmh -lxcb-randr -lxcb-xinerama -lxcb-shape -lxkbcommon
     CPPFLAGS += -DBACKEND_X11
+    SESSION_FILE = contrib/freedesktop/bspwm.desktop
+    SESSION_DIR  = $(XSESSIONS)
 else ifeq ($(BACKEND),wlroots)
     WLROOTS_DIR ?= ../wlroots
-    BACKEND_SRC = backend_wlr.c window_ops.c
+    WM_BIN       = bspwm-wl
+    BACKEND_SRC  = backend_wlr.c window_ops.c
     BACKEND_LIBS = -L$(WLROOTS_DIR)/build -lwlroots-0.21 $(shell pkg-config --libs wayland-server xkbcommon 2>/dev/null)
     CPPFLAGS += -DBACKEND_WLROOTS -DWLR_USE_UNSTABLE
     CFLAGS += -I$(WLROOTS_DIR)/include -I$(WLROOTS_DIR)/build/include -I$(WLROOTS_DIR)/build/protocol $(shell pkg-config --cflags wayland-server libdrm pixman-1 xkbcommon 2>/dev/null)
+    SESSION_FILE = contrib/freedesktop/bspwm-wayland.desktop
+    SESSION_DIR  = $(WLSESSIONS)
 else
     $(error Unknown BACKEND=$(BACKEND). Use x11 or wlroots)
 endif
@@ -40,32 +49,42 @@ XSESSIONS  ?= $(PREFIX)/share/xsessions
 WLSESSIONS ?= $(PREFIX)/share/wayland-sessions
 CONFPREFIX ?= $(DESTDIR)$(HOME)/.config
 
+# Objects live under build/<backend>/ so switching BACKEND can never link
+# objects compiled with the other backend's defines (bspwm.c, rule.c and
+# helpers.h all carry BACKEND_* ifdefs). Header deps come from the compiler.
+OBJDIR   = build/$(BACKEND)
 WM_SRC   = $(CORE_SRC) $(BACKEND_SRC)
-WM_OBJ  := $(WM_SRC:.c=.o)
+WM_OBJ  := $(addprefix $(OBJDIR)/,$(WM_SRC:.c=.o))
 CLI_SRC  = bspc.c helpers.c
-CLI_OBJ := $(CLI_SRC:.c=.o)
+CLI_OBJ := $(addprefix $(OBJDIR)/,$(CLI_SRC:.c=.o))
 
-CLI_LIBS = -lxcb
+# bspc parses DISPLAY itself; it needs no X or Wayland library.
+CLI_LIBS =
 
-all: bspwm bspc
+all: $(WM_BIN) bspc
 
 debug: CFLAGS += -O0 -g
-debug: bspwm bspc
+debug: $(WM_BIN) bspc
 
-VPATH=src
+$(OBJDIR)/%.o: src/%.c Makefile
+	@mkdir -p $(OBJDIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c -o $@ $<
 
-include Sourcedeps
+-include $(WM_OBJ:.o=.d) $(CLI_OBJ:.o=.d)
 
-$(WM_OBJ) $(CLI_OBJ): Makefile
-
-bspwm: $(WM_OBJ)
+$(WM_BIN): $(WM_OBJ)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 bspc: LDLIBS = $(CLI_LIBS)
 bspc: $(CLI_OBJ)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
+# Installs the binary and session file for the backend just built, nothing
+# else. An X11-only build must not leave a wayland-sessions entry behind (and
+# vice versa): a display manager would offer a session that cannot start.
 install:
 	mkdir -p "$(DESTDIR)$(BINPREFIX)"
-	cp -pf bspwm "$(DESTDIR)$(BINPREFIX)"
+	cp -pf $(WM_BIN) "$(DESTDIR)$(BINPREFIX)"
 	cp -pf bspc "$(DESTDIR)$(BINPREFIX)"
 	mkdir -p "$(DESTDIR)$(MANPREFIX)"/man1
 	cp -p doc/bspwm.1 "$(DESTDIR)$(MANPREFIX)"/man1
@@ -80,10 +99,8 @@ install:
 	cp -p $(MD_DOCS) "$(DESTDIR)$(DOCPREFIX)"
 	mkdir -p "$(DESTDIR)$(DOCPREFIX)"/examples
 	cp -pr examples/* "$(DESTDIR)$(DOCPREFIX)"/examples
-	mkdir -p "$(DESTDIR)$(XSESSIONS)"
-	cp -p contrib/freedesktop/bspwm.desktop "$(DESTDIR)$(XSESSIONS)"
-	mkdir -p "$(DESTDIR)$(WLSESSIONS)"
-	cp -p contrib/freedesktop/bspwm-wayland.desktop "$(DESTDIR)$(WLSESSIONS)"
+	mkdir -p "$(DESTDIR)$(SESSION_DIR)"
+	cp -p $(SESSION_FILE) "$(DESTDIR)$(SESSION_DIR)"
 
 install_cfg:
 	mkdir -p "$(CONFPREFIX)"/bspwm
@@ -93,7 +110,7 @@ install_cfg:
 	chmod +x "$(CONFPREFIX)"/bspwm/bspwmrc
 
 uninstall:
-	rm -f "$(DESTDIR)$(BINPREFIX)"/bspwm
+	rm -f "$(DESTDIR)$(BINPREFIX)"/$(WM_BIN)
 	rm -f "$(DESTDIR)$(BINPREFIX)"/bspc
 	rm -f "$(DESTDIR)$(MANPREFIX)"/man1/bspwm.1
 	rm -f "$(DESTDIR)$(MANPREFIX)"/man1/bspc.1
@@ -101,16 +118,15 @@ uninstall:
 	rm -f "$(DESTDIR)$(FISHCPL)"/bspc.fish
 	rm -f "$(DESTDIR)$(ZSHCPL)"/_bspc
 	rm -rf "$(DESTDIR)$(DOCPREFIX)"
-	rm -f "$(DESTDIR)$(XSESSIONS)"/bspwm.desktop
-	rm -f "$(DESTDIR)$(WLSESSIONS)"/bspwm-wayland.desktop
+	rm -f "$(DESTDIR)$(SESSION_DIR)"/$(notdir $(SESSION_FILE))
 
-test: bspwm bspc
+test: $(WM_BIN) bspc
 	@cd tests && $(MAKE) && ./run_headless $(BACKEND)
 
 doc:
 	a2x -v -d manpage -f manpage -a revnumber=$(VERSION) doc/bspwm.1.asciidoc
 
 clean:
-	rm -f $(WM_OBJ) $(CLI_OBJ) bspwm bspc
+	rm -rf build bspwm bspwm-wl bspc
 
 .PHONY: all debug install install_cfg uninstall doc clean test

@@ -1,6 +1,7 @@
 # Build artifacts
 tags
 bspwm
+build/
 bspc
 *.o
 tests/test_window
