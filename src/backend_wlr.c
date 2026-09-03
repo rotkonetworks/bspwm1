@@ -75,6 +75,7 @@
 #include <wlr/types/wlr_output_power_management_v1.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
+#include <wlr/types/wlr_output_management_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/xwayland.h>
 #include <wlr/util/log.h>
@@ -218,6 +219,9 @@ static struct {
 	struct wl_listener cursor_shape_request;
 	struct wlr_gamma_control_manager_v1 *gamma_mgr;
 	struct wl_listener gamma_set;
+	struct wlr_output_manager_v1 *output_mgr;
+	struct wl_listener output_mgr_apply;
+	struct wl_listener output_mgr_test;
 	struct wl_list keyboards;
 
 	struct wlr_output_layout *output_layout;
@@ -401,12 +405,104 @@ static void output_frame(struct wl_listener *listener, void *data)
 	struct bspwm_wlr_output *output = wl_container_of(listener, output, frame);
 	struct wlr_scene_output *scene_output =
 		wlr_scene_get_scene_output(server.scene, output->wlr_output);
-	if (scene_output) {
-		wlr_scene_output_commit(scene_output, NULL);
-	}
+	if (!scene_output) return;
+	wlr_scene_output_commit(scene_output, NULL);
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	wlr_scene_output_send_frame_done(scene_output, &now);
+}
+
+/* wlr-output-management: publish the current layout to clients (wlr-randr,
+ * kanshi, wdisplays) and apply the configurations they send back. */
+static void output_manager_update(void)
+{
+	if (!server.output_mgr) return;
+	struct wlr_output_configuration_v1 *config = wlr_output_configuration_v1_create();
+	struct bspwm_wlr_output *out;
+	wl_list_for_each(out, &server.outputs, link) {
+		struct wlr_output_configuration_head_v1 *head =
+			wlr_output_configuration_head_v1_create(config, out->wlr_output);
+		struct wlr_output_layout_output *lo =
+			wlr_output_layout_get(server.output_layout, out->wlr_output);
+		head->state.enabled = lo != NULL && out->wlr_output->enabled;
+		if (lo) {
+			head->state.x = lo->x;
+			head->state.y = lo->y;
+		}
+	}
+	wlr_output_manager_v1_set_configuration(server.output_mgr, config);
+}
+
+static void output_manager_handle(struct wlr_output_configuration_v1 *config, bool test_only)
+{
+	bool ok = true;
+	struct wlr_output_configuration_head_v1 *head;
+	wl_list_for_each(head, &config->heads, link) {
+		struct wlr_output *wlr_output = head->state.output;
+		struct wlr_output_state state;
+		wlr_output_state_init(&state);
+		wlr_output_state_set_enabled(&state, head->state.enabled);
+		if (head->state.enabled) {
+			if (head->state.mode) {
+				wlr_output_state_set_mode(&state, head->state.mode);
+			} else {
+				wlr_output_state_set_custom_mode(&state,
+					head->state.custom_mode.width, head->state.custom_mode.height,
+					head->state.custom_mode.refresh);
+			}
+			wlr_output_state_set_transform(&state, head->state.transform);
+			wlr_output_state_set_scale(&state, head->state.scale);
+			wlr_output_state_set_adaptive_sync_enabled(&state, head->state.adaptive_sync_enabled);
+		}
+		if (test_only) {
+			ok = wlr_output_test_state(wlr_output, &state) && ok;
+		} else if (wlr_output_commit_state(wlr_output, &state)) {
+			if (head->state.enabled) {
+				/* Adding an output already in the layout moves it. A
+				 * re-enabled output needs its scene output linked again;
+				 * the scene output itself survives layout removal. */
+				struct wlr_output_layout_output *lo = wlr_output_layout_add(
+					server.output_layout, wlr_output, head->state.x, head->state.y);
+				struct wlr_scene_output *so = wlr_scene_get_scene_output(server.scene, wlr_output);
+				if (lo && so) {
+					wlr_scene_output_layout_add_output(server.scene_layout, lo, so);
+				}
+			} else {
+				wlr_output_layout_remove(server.output_layout, wlr_output);
+			}
+		} else {
+			ok = false;
+		}
+		wlr_output_state_finish(&state);
+	}
+
+	if (ok) {
+		wlr_output_configuration_v1_send_succeeded(config);
+	} else {
+		wlr_output_configuration_v1_send_failed(config);
+	}
+	wlr_output_configuration_v1_destroy(config);
+
+	if (!test_only) {
+		update_monitors();
+		struct bspwm_wlr_output *out;
+		wl_list_for_each(out, &server.outputs, link) {
+			arrange_layers(out);
+		}
+		output_manager_update();
+	}
+}
+
+static void output_manager_apply(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	output_manager_handle(data, false);
+}
+
+static void output_manager_test(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	output_manager_handle(data, true);
 }
 
 static void output_request_state(struct wl_listener *listener, void *data)
@@ -418,6 +514,7 @@ static void output_request_state(struct wl_listener *listener, void *data)
 	 * padding so tiled windows reflow into the new usable area. Without
 	 * this, hotplugging or rotating leaves stale m->padding values. */
 	arrange_layers(output);
+	output_manager_update();
 }
 
 static void output_destroy(struct wl_listener *listener, void *data)
@@ -433,6 +530,7 @@ static void output_destroy(struct wl_listener *listener, void *data)
 
 	/* Notify bspwm core of output change */
 	update_monitors();
+	output_manager_update();
 }
 
 static void server_new_output(struct wl_listener *listener, void *data)
@@ -475,6 +573,7 @@ static void server_new_output(struct wl_listener *listener, void *data)
 
 	/* Notify bspwm core */
 	update_monitors();
+	output_manager_update();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1706,6 +1805,12 @@ int backend_init(int *default_screen)
 	server.gamma_set.notify = gamma_set;
 	wl_signal_add(&server.gamma_mgr->events.set_gamma, &server.gamma_set);
 
+	server.output_mgr = wlr_output_manager_v1_create(server.wl_display);
+	server.output_mgr_apply.notify = output_manager_apply;
+	wl_signal_add(&server.output_mgr->events.apply, &server.output_mgr_apply);
+	server.output_mgr_test.notify = output_manager_test;
+	wl_signal_add(&server.output_mgr->events.test, &server.output_mgr_test);
+
 	/* XDG decoration — force server-side borders */
 	server.decoration_mgr = wlr_xdg_decoration_manager_v1_create(server.wl_display);
 	server.new_decoration.notify = new_decoration;
@@ -2219,8 +2324,12 @@ int backend_query_outputs(bspwm_output_info_t *outputs, int max)
 
 		outputs[count].rect.x = lo->x;
 		outputs[count].rect.y = lo->y;
-		outputs[count].rect.width = out->wlr_output->width;
-		outputs[count].rect.height = out->wlr_output->height;
+		/* Effective size accounts for transform and scale; the raw mode
+		 * size is wrong for a rotated or scaled output. */
+		int ew = 0, eh = 0;
+		wlr_output_effective_resolution(out->wlr_output, &ew, &eh);
+		outputs[count].rect.width = ew;
+		outputs[count].rect.height = eh;
 
 		count++;
 	}
