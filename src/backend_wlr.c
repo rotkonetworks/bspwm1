@@ -65,6 +65,16 @@
 #include <wlr/types/wlr_session_lock_v1.h>
 #include <wlr/types/wlr_viewporter.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
+#include <wlr/types/wlr_xdg_output_v1.h>
+#include <wlr/types/wlr_data_control_v1.h>
+#include <wlr/types/wlr_ext_data_control_v1.h>
+#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_primary_selection_v1.h>
+#include <wlr/types/wlr_presentation_time.h>
+#include <wlr/types/wlr_single_pixel_buffer_v1.h>
+#include <wlr/types/wlr_output_power_management_v1.h>
+#include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/xwayland.h>
 #include <wlr/util/log.h>
@@ -104,7 +114,19 @@ struct bspwm_wlr_toplevel {
 	struct wl_listener request_maximize;
 	struct wl_listener request_fullscreen;
 
+	/* xdg-decoration object, if the client created one. The mode can only
+	 * be sent once the surface is initialized (after its initial commit),
+	 * so it is applied from xdg_toplevel_commit when it arrives early. */
+	struct wlr_xdg_toplevel_decoration_v1 *decoration;
+	struct wl_listener decoration_destroy;
+
 	struct wl_list link; /* wlr_server.toplevels */
+};
+
+struct bspwm_wlr_popup {
+	struct wlr_xdg_popup *xdg_popup;
+	struct wl_listener commit;
+	struct wl_listener destroy;
 };
 
 struct bspwm_wlr_output {
@@ -186,6 +208,16 @@ static struct {
 	struct wl_listener new_input;
 	struct wl_listener request_cursor;
 	struct wl_listener request_set_selection;
+	struct wl_listener request_set_primary_selection;
+
+	/* Protocols that bars, launchers, clipboard managers and idle tools
+	 * require. All but xdg-output are optional to the tree itself. */
+	struct wlr_output_power_manager_v1 *output_power_mgr;
+	struct wl_listener output_power_set_mode;
+	struct wlr_cursor_shape_manager_v1 *cursor_shape_mgr;
+	struct wl_listener cursor_shape_request;
+	struct wlr_gamma_control_manager_v1 *gamma_mgr;
+	struct wl_listener gamma_set;
 	struct wl_list keyboards;
 
 	struct wlr_output_layout *output_layout;
@@ -213,6 +245,7 @@ static struct {
 	/* XWayland */
 	struct wlr_xwayland *xwayland;
 	struct wl_listener xwayland_new_surface;
+	struct wl_listener xwayland_ready;
 	struct wl_list xwayland_surfaces;
 
 	/* Scene trees for the 4 layer shell layers */
@@ -490,7 +523,14 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data)
 	(void)data;
 
 	if (tl->xdg_toplevel->base->initial_commit) {
+		/* The compositor must answer the initial commit with a configure
+		 * before the client can map. 0x0 lets the client pick its size;
+		 * the tree layout resizes it once it is managed. */
 		wlr_xdg_toplevel_set_size(tl->xdg_toplevel, 0, 0);
+		if (tl->decoration) {
+			wlr_xdg_toplevel_decoration_v1_set_mode(tl->decoration,
+				WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+		}
 	}
 
 	/* Update borders when surface geometry changes */
@@ -512,6 +552,10 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&tl->request_resize.link);
 	wl_list_remove(&tl->request_maximize.link);
 	wl_list_remove(&tl->request_fullscreen.link);
+	if (tl->decoration) {
+		wl_list_remove(&tl->decoration_destroy.link);
+		tl->decoration = NULL;
+	}
 	wl_list_remove(&tl->link);
 	free(tl);
 }
@@ -590,6 +634,27 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data)
 	wl_list_insert(&server.toplevels, &tl->link);
 }
 
+static void xdg_popup_commit(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_popup *p = wl_container_of(listener, p, commit);
+	(void)data;
+
+	/* Same contract as toplevels: no configure after the initial commit
+	 * means the popup (menu, tooltip, combo box) never maps. */
+	if (p->xdg_popup->base->initial_commit) {
+		wlr_xdg_surface_schedule_configure(p->xdg_popup->base);
+	}
+}
+
+static void xdg_popup_destroy(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_popup *p = wl_container_of(listener, p, destroy);
+	(void)data;
+	wl_list_remove(&p->commit.link);
+	wl_list_remove(&p->destroy.link);
+	free(p);
+}
+
 static void server_new_xdg_popup(struct wl_listener *listener, void *data)
 {
 	(void)listener;
@@ -601,6 +666,14 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data)
 
 	struct wlr_scene_tree *parent_tree = parent->data;
 	popup->base->data = wlr_scene_xdg_surface_create(parent_tree, popup->base);
+
+	struct bspwm_wlr_popup *p = calloc(1, sizeof(*p));
+	if (!p) return;
+	p->xdg_popup = popup;
+	p->commit.notify = xdg_popup_commit;
+	wl_signal_add(&popup->base->surface->events.commit, &p->commit);
+	p->destroy.notify = xdg_popup_destroy;
+	wl_signal_add(&popup->events.destroy, &p->destroy);
 }
 
 /* ------------------------------------------------------------------ */
@@ -993,16 +1066,91 @@ static void seat_request_set_selection(struct wl_listener *listener, void *data)
 	wlr_seat_set_selection(server.seat, event->source, event->serial);
 }
 
+static void seat_request_set_primary_selection(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	struct wlr_seat_request_set_primary_selection_event *event = data;
+	wlr_seat_set_primary_selection(server.seat, event->source, event->serial);
+}
+
+/* wlr-output-power-management: swayidle/wlopm turning outputs off and on. */
+static void output_power_set_mode(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	struct wlr_output_power_v1_set_mode_event *event = data;
+	struct wlr_output_state state;
+	wlr_output_state_init(&state);
+	wlr_output_state_set_enabled(&state, event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON);
+	wlr_output_commit_state(event->output, &state);
+	wlr_output_state_finish(&state);
+}
+
+/* cursor-shape-v1: clients name a cursor instead of uploading one. Only the
+ * client under the pointer may change it. */
+static void cursor_shape_request(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	struct wlr_cursor_shape_manager_v1_request_set_shape_event *event = data;
+	if (event->seat_client != server.seat->pointer_state.focused_client) return;
+	wlr_cursor_set_xcursor(server.cursor, server.cursor_mgr,
+		wlr_cursor_shape_v1_name(event->shape));
+}
+
+/* wlr-gamma-control: wlsunset/gammastep. A NULL control resets the ramp. */
+static void gamma_set(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	struct wlr_gamma_control_manager_v1_set_gamma_event *event = data;
+	struct wlr_output_state state;
+	wlr_output_state_init(&state);
+	if (!wlr_gamma_control_v1_apply(event->control, &state)) {
+		wlr_output_state_finish(&state);
+		return;
+	}
+	if (!wlr_output_commit_state(event->output, &state) && event->control) {
+		wlr_gamma_control_v1_send_failed_and_destroy(event->control);
+	}
+	wlr_output_state_finish(&state);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Decoration handling (force server-side)                           */
 /* ------------------------------------------------------------------ */
+
+static void decoration_destroy(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_toplevel *tl = wl_container_of(listener, tl, decoration_destroy);
+	(void)data;
+	wl_list_remove(&tl->decoration_destroy.link);
+	tl->decoration = NULL;
+}
 
 static void new_decoration(struct wl_listener *listener, void *data)
 {
 	(void)listener;
 	struct wlr_xdg_toplevel_decoration_v1 *deco = data;
-	wlr_xdg_toplevel_decoration_v1_set_mode(deco,
-		WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+
+	struct bspwm_wlr_toplevel *tl = NULL, *it;
+	wl_list_for_each(it, &server.toplevels, link) {
+		if (it->xdg_toplevel == deco->toplevel) {
+			tl = it;
+			break;
+		}
+	}
+	if (!tl) return;
+
+	tl->decoration = deco;
+	tl->decoration_destroy.notify = decoration_destroy;
+	wl_signal_add(&deco->events.destroy, &tl->decoration_destroy);
+
+	/* Sending the mode schedules a configure, which wlroots refuses (assert)
+	 * on a surface that has not done its initial commit yet. Clients such as
+	 * foot and alacritty create the decoration before that commit; for them
+	 * the mode goes out from xdg_toplevel_commit instead. */
+	if (deco->toplevel->base->initialized) {
+		wlr_xdg_toplevel_decoration_v1_set_mode(deco,
+			WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -1030,6 +1178,11 @@ static void arrange_layers(struct bspwm_wlr_output *output)
 			if (ls->layer_surface->output != output->wlr_output)
 				continue;
 			if ((int)ls->layer_surface->current.layer != layer)
+				continue;
+			/* A surface that has not done its initial commit cannot be
+			 * configured yet (wlroots asserts). layer_surface_commit
+			 * re-arranges once it has. */
+			if (!ls->layer_surface->initialized)
 				continue;
 			wlr_scene_layer_surface_v1_configure(ls->scene, &full_area, &usable_area);
 		}
@@ -1298,6 +1451,17 @@ static void xwayland_surface_request_configure(struct wl_listener *listener, voi
 	wlr_xwayland_surface_configure(xs->xsurface, ev->x, ev->y, ev->width, ev->height);
 }
 
+static void xwayland_ready(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	(void)data;
+	/* Xwayland may be restarted on a different display; keep DISPLAY
+	 * current for anything spawned from here on. */
+	if (server.xwayland && server.xwayland->display_name[0] != '\0') {
+		setenv("DISPLAY", server.xwayland->display_name, true);
+	}
+}
+
 static void server_new_xwayland_surface(struct wl_listener *listener, void *data)
 {
 	(void)listener;
@@ -1514,6 +1678,33 @@ int backend_init(int *default_screen)
 	wl_signal_add(&server.seat->events.request_set_cursor, &server.request_cursor);
 	server.request_set_selection.notify = seat_request_set_selection;
 	wl_signal_add(&server.seat->events.request_set_selection, &server.request_set_selection);
+	server.request_set_primary_selection.notify = seat_request_set_primary_selection;
+	wl_signal_add(&server.seat->events.request_set_primary_selection,
+		&server.request_set_primary_selection);
+
+	/* Selections: primary (middle-click paste) and data-control (clipboard
+	 * managers such as nocb, wl-paste --watch, cliphist). */
+	wlr_primary_selection_v1_device_manager_create(server.wl_display);
+	wlr_data_control_manager_v1_create(server.wl_display);
+	wlr_ext_data_control_manager_v1_create(server.wl_display, 1);
+
+	/* Output description for bars and launchers (waybar refuses to start
+	 * without xdg-output), plus presentation timing and 1x1 buffers. */
+	wlr_xdg_output_manager_v1_create(server.wl_display, server.output_layout);
+	wlr_presentation_create(server.wl_display, server.backend, 2);
+	wlr_single_pixel_buffer_manager_v1_create(server.wl_display);
+
+	server.output_power_mgr = wlr_output_power_manager_v1_create(server.wl_display);
+	server.output_power_set_mode.notify = output_power_set_mode;
+	wl_signal_add(&server.output_power_mgr->events.set_mode, &server.output_power_set_mode);
+
+	server.cursor_shape_mgr = wlr_cursor_shape_manager_v1_create(server.wl_display, 1);
+	server.cursor_shape_request.notify = cursor_shape_request;
+	wl_signal_add(&server.cursor_shape_mgr->events.request_set_shape, &server.cursor_shape_request);
+
+	server.gamma_mgr = wlr_gamma_control_manager_v1_create(server.wl_display);
+	server.gamma_set.notify = gamma_set;
+	wl_signal_add(&server.gamma_mgr->events.set_gamma, &server.gamma_set);
 
 	/* XDG decoration — force server-side borders */
 	server.decoration_mgr = wlr_xdg_decoration_manager_v1_create(server.wl_display);
@@ -1533,8 +1724,23 @@ int backend_init(int *default_screen)
 	}
 	setenv("WAYLAND_DISPLAY", server.socket, true);
 	if (server.xwayland) {
-		setenv("DISPLAY", server.xwayland->display_name, true);
+		/* A non-lazy Xwayland is started from an idle callback, so its
+		 * display name is still empty here. Run the idle sources now: the
+		 * sockets get bound and the name filled in, and X clients started
+		 * by the config file queue on the socket until Xwayland is up. */
+		wl_event_loop_dispatch_idle(wl_display_get_event_loop(server.wl_display));
+		if (server.xwayland->display_name[0] != '\0') {
+			setenv("DISPLAY", server.xwayland->display_name, true);
+		} else {
+			unsetenv("DISPLAY");
+		}
+		server.xwayland_ready.notify = xwayland_ready;
+		wl_signal_add(&server.xwayland->events.ready, &server.xwayland_ready);
 		wlr_xwayland_set_seat(server.xwayland, server.seat);
+	} else {
+		/* No Xwayland: an inherited DISPLAY would point X clients at some
+		 * other server, or at nothing. */
+		unsetenv("DISPLAY");
 	}
 
 	/* Start the backend */

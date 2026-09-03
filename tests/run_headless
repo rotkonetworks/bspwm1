@@ -79,9 +79,12 @@ fi
 # Pick up the socket — find the most recently created bspwm socket
 if [ "$BACKEND" = "wlroots" ]; then
 	# bspwm creates socket at /tmp/bspwm<wayland-display>_0_0-socket
-	SOCK=$(ls -t /tmp/bspwm*-socket 2>/dev/null | head -1)
+	SOCK=$(ls -t /tmp/bspwmwayland-*-socket 2>/dev/null | head -1)
 	if [ -n "$SOCK" ]; then
 		export BSPWM_SOCKET="$SOCK"
+		# Point the test clients at this compositor, not at whatever
+		# wayland-0 happens to be running on the machine.
+		export WAYLAND_DISPLAY=$(basename "$SOCK" | sed 's/^bspwm\(wayland-[0-9]*\)_.*/\1/')
 	fi
 fi
 

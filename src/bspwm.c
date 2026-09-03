@@ -254,6 +254,13 @@ int main(int argc, char *argv[])
 		}
 
 		socket_path_set = true;
+
+		/* Hand the path to everything we spawn (config file, keybinds,
+		 * rules). bspc otherwise re-derives it from DISPLAY, which under
+		 * the wlroots backend names the Xwayland display while this socket
+		 * is named after the Wayland one: every bspc in the config failed
+		 * to connect. */
+		setenv(SOCKET_ENV_VAR, socket_path, true);
 	}
 
 	fcntl(sock_fd, F_SETFD, FD_CLOEXEC | fcntl(sock_fd, F_GETFD));
