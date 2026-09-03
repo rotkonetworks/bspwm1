@@ -31,23 +31,25 @@ else ifeq ($(BACKEND),wlroots)
     # instead, e.g. for a wlroots-git development tree.
     WLROOTS_PC  ?= wlroots-0.20
     ifdef WLROOTS_DIR
-        BACKEND_LIBS = -L$(WLROOTS_DIR)/build -lwlroots-$(WLROOTS_ABI)
+        # A checkout ships its own generated protocol headers in build/protocol.
         WLROOTS_ABI ?= 0.21
+        BACKEND_LIBS = -L$(WLROOTS_DIR)/build -lwlroots-$(WLROOTS_ABI)
         CFLAGS += -I$(WLROOTS_DIR)/include -I$(WLROOTS_DIR)/build/include -I$(WLROOTS_DIR)/build/protocol
+        PROTO_HDRS =
     else
         BACKEND_LIBS = $(shell pkg-config --libs $(WLROOTS_PC))
         CFLAGS += $(shell pkg-config --cflags $(WLROOTS_PC))
+        # wlroots' public headers include generated protocol headers that the
+        # compositor is expected to produce itself (wlr-protocols XML through
+        # wayland-scanner).
+        PROTO_DIR  = build/$(BACKEND)/protocol
+        PROTO_HDRS = $(PROTO_DIR)/wlr-layer-shell-unstable-v1-protocol.h \
+                     $(PROTO_DIR)/wlr-output-power-management-unstable-v1-protocol.h
+        CFLAGS += -I$(PROTO_DIR)
+        WLR_PROTOCOLS_DIR ?= $(shell pkg-config --variable=pkgdatadir wlr-protocols 2>/dev/null || echo /usr/share/wlr-protocols)
     endif
     BACKEND_LIBS += $(shell pkg-config --libs wayland-server xkbcommon 2>/dev/null)
     CFLAGS += $(shell pkg-config --cflags wayland-server libdrm pixman-1 xkbcommon 2>/dev/null)
-    # wlroots' public headers include generated protocol headers that the
-    # compositor is expected to produce itself (wayland-protocols and
-    # wlr-protocols XML through wayland-scanner).
-    PROTO_DIR  = build/$(BACKEND)/protocol
-    PROTO_HDRS = $(PROTO_DIR)/wlr-layer-shell-unstable-v1-protocol.h \
-                 $(PROTO_DIR)/wlr-output-power-management-unstable-v1-protocol.h
-    CFLAGS += -I$(PROTO_DIR)
-    WLR_PROTOCOLS_DIR ?= $(shell pkg-config --variable=pkgdatadir wlr-protocols 2>/dev/null || echo /usr/share/wlr-protocols)
 else
     $(error Unknown BACKEND=$(BACKEND). Use x11 or wlroots)
 endif
