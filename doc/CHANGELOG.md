@@ -21,8 +21,11 @@ found by running it nested inside an X session with a full desktop config.
 - `bspc` parses `DISPLAY` itself and no longer links libxcb.
 - Wayland protocols: xdg-output, wlr-output-management, primary selection,
   wlr and ext data-control, presentation-time, single-pixel-buffer, output
-  power management, cursor-shape, gamma control. Bars, launchers, clipboard
-  managers, wlr-randr, kanshi, swayidle and wlsunset now work.
+  power management, cursor-shape, gamma control. Verified nested with
+  waybar, rofi, wofi, dunst, foot, alacritty, xterm through Xwayland and
+  wlr-randr (disable, enable, move, rotate). The rest is implemented to the
+  protocol and not yet exercised: kanshi, swayidle output power, wlsunset,
+  cursor-shape, data-control from a clipboard manager.
 
 ### Fixed
 
