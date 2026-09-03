@@ -33,21 +33,29 @@ jobs:
         # tests/test_window.c opens to label its window; without it the helper
         # exits and every window-management test sees an empty tree.
         pacman -Syu --noconfirm base-devel git libxcb xcb-util xcb-util-keysyms \
-          xcb-util-wm libxkbcommon wayland xorg-server-xvfb xorg-fonts-misc
-    - name: Build
+          xcb-util-wm libxkbcommon wayland xorg-server-xvfb xorg-fonts-misc \
+          wlroots0.20 wayland-protocols wlr-protocols pixman libdrm xorg-xwayland
+    - name: Build X11 backend
       run: make
+    - name: Build wlroots backend
+      run: make BACKEND=wlroots
     # Every tag from v1.2.3 to v1.2.10 produced no binaries: the build failed
     # on a missing xkbcommon header and nothing here noticed, because the
     # release step is what surfaces problems and it never ran. Run the suite
     # so a broken tag fails loudly instead of silently shipping nothing.
-    - name: Test
+    - name: Test X11 backend
       run: make test
+    # The wlroots suite runs on wlroots' headless backend with the pixman
+    # renderer, so it needs no GPU and no display server.
+    - name: Test wlroots backend
+      run: make test BACKEND=wlroots
     - name: Strip binaries
-      run: strip bspwm bspc
+      run: strip bspwm bspwm-wl bspc
     - name: Report version and checksums
       run: |
         ./bspwm -v
-        sha256sum bspwm bspc | tee sha256sums.txt
+        ./bspwm-wl -v
+        sha256sum bspwm bspwm-wl bspc | tee sha256sums.txt
     - name: Release
       uses: softprops/action-gh-release@v3
       with:
@@ -58,5 +66,6 @@ jobs:
         fail_on_unmatched_files: true
         files: |
           bspwm
+          bspwm-wl
           bspc
           sha256sums.txt
