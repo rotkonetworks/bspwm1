@@ -1,3 +1,50 @@
+# v1.6.0
+
+The Wayland compositor build is now real. `bspwm-wl` had never been run
+with an ordinary client: the headless suite's test window uses no
+decoration, popups or layer shell, so it stayed green while foot, alacritty
+and waybar each crashed the compositor on connect. Everything below was
+found by running it nested inside an X session with a full desktop config.
+
+### New
+
+- **One binary per backend.** The X11 build stays `bspwm`, the wlroots
+  compositor is `bspwm-wl`. Objects live under `build/<backend>/`, so the
+  two build side by side and switching `BACKEND` can no longer link objects
+  compiled with the other backend's defines. `make install` installs only
+  the session file for the backend built; an X11-only build no longer leaves
+  a `wayland-sessions` entry pointing at a binary that does not exist.
+- **`bspwm-wl` builds against the distro wlroots** (pkg-config
+  `wlroots-0.20`) by default and generates the protocol headers it needs.
+  `WLROOTS_DIR` still selects a source checkout. `pkg/arch/bspwm1-wl` is the
+  matching AUR package.
+- `bspc` parses `DISPLAY` itself and no longer links libxcb.
+- Wayland protocols: xdg-output, wlr-output-management, primary selection,
+  wlr and ext data-control, presentation-time, single-pixel-buffer, output
+  power management, cursor-shape, gamma control. Bars, launchers, clipboard
+  managers, wlr-randr, kanshi, swayidle and wlsunset now work.
+
+### Fixed
+
+- **Any client using xdg-decoration crashed `bspwm-wl`.** The decoration
+  mode was sent before the surface's initial commit, which wlroots asserts
+  on. It is now sent from the initial commit.
+- **waybar crashed `bspwm-wl`** the same way through layer-shell:
+  `arrange_layers` configured surfaces that had not committed yet.
+- **Popups never mapped.** No configure was sent after a popup's initial
+  commit, so menus and tooltips could not appear.
+- **The config file did nothing under Wayland.** `bspc` derived the socket
+  path from `DISPLAY`, which is the Xwayland display there, while the
+  compositor named its socket after the Wayland display. The WM now exports
+  `BSPWM_SOCKET` to everything it spawns.
+- `DISPLAY` was inherited instead of set to the Xwayland display, because a
+  non-lazy Xwayland starts from an idle callback and had no name yet.
+- A disabled output is now an unwired monitor, as on X11, and monitor
+  geometry reports the effective (transformed, scaled) resolution.
+- `tests/run_headless`: the wlroots run picks the right binary, exports
+  `WAYLAND_DISPLAY` for its clients, no longer trips on an undefined
+  variable in the focus test, and prints colours under plain `sh`.
+
 # v1.5.0
 
 Merged nine commits from Lorenzo Leonini's fork

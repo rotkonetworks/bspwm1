@@ -2,21 +2,21 @@
 # PGP: 813CE099D6CE512BC29A15D841EE1853489958D6
 
 pkgname=bspwm1-wl
-pkgver=1.5.0
+pkgver=1.6.0
 pkgrel=1
 pkgdesc="bspwm as a Wayland compositor (wlroots backend of bspwm1)"
 arch=('x86_64')
 url="https://github.com/rotkonetworks/bspwm1"
 license=('BSD-2-Clause')
-depends=('wlroots0.20' 'wayland' 'libxkbcommon' 'pixman' 'libdrm' 'xorg-xwayland')
+depends=('bspwm1' 'wlroots0.20' 'wayland' 'libxkbcommon' 'pixman' 'libdrm' 'xorg-xwayland')
 makedepends=('git' 'wayland-protocols' 'wlr-protocols')
-optdepends=('bspwm1: bspc client and the X11 build'
+optdepends=(
             'waybar: status bar'
             'rofi: launcher (has a native Wayland backend)'
             'dunst: notifications'
             'swaylock: screen locker'
             'swayidle: idle management')
-# bspc is shared with bspwm1 and identical in both packages.
+# bspc comes from bspwm1, which this package depends on.
 provides=('bspwm-wl')
 # Pinned to the release tag, see pkg/arch/PKGBUILD for why.
 source=("git+${url}.git#tag=v${pkgver}")
