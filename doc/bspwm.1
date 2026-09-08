@@ -1793,7 +1793,12 @@ The path of the socket used for the communication between
 \fBbspc\fR
 and
 \fBbspwm\fR\&. If it isn\(cqt defined, then the following path is used:
-\fI/tmp/bspwm<host_name>_<display_number>_<screen_number>\-socket\fR\&.
+\fI$XDG_RUNTIME_DIR/bspwm<host_name>_<display_number>_<screen_number>\-socket\fR
+(falling back to
+\fI/tmp/bspwm<host_name>_<display_number>_<screen_number>\-socket\fR
+when
+\fI$XDG_RUNTIME_DIR\fR
+is unset)\&.
 .RE
 .SH "CONTRIBUTORS"
 .sp

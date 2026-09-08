@@ -25,7 +25,13 @@
 #ifndef BSPWM_COMMON_H
 #define BSPWM_COMMON_H
 
-#define SOCKET_PATH_TPL  "/tmp/bspwm%s_%i_%i-socket"
+/* Socket path templates. The socket belongs in $XDG_RUNTIME_DIR (per-user,
+ * 0700, cleaned on logout) and only falls back to /tmp when that is unset.
+ * /tmp is world-writable and swept by the systemd-tmpfiles timer, which can
+ * remove a live socket out from under a running session. Both bspwm and bspc
+ * resolve the path through make_socket_path() so they always agree. */
+#define SOCKET_PATH_TPL      "/tmp/bspwm%s_%i_%i-socket"
+#define SOCKET_PATH_TPL_XDG  "%s/bspwm%s_%i_%i-socket"
 #define SOCKET_ENV_VAR   "BSPWM_SOCKET"
 
 #define FAILURE_MESSAGE  "\x07"

@@ -83,8 +83,10 @@ fi
 
 # Pick up the socket — find the most recently created bspwm socket
 if [ "$BACKEND" = "wlroots" ]; then
-	# bspwm creates socket at /tmp/bspwm<wayland-display>_0_0-socket
-	SOCK=$(ls -t /tmp/bspwmwayland-*-socket 2>/dev/null | head -1)
+	# bspwm creates socket at $XDG_RUNTIME_DIR/bspwm<wayland-display>_0_0-socket
+	# (falling back to /tmp when XDG_RUNTIME_DIR is unset).
+	SOCKDIR="${XDG_RUNTIME_DIR:-/tmp}"
+	SOCK=$(ls -t "$SOCKDIR"/bspwmwayland-*-socket 2>/dev/null | head -1)
 	if [ -n "$SOCK" ]; then
 		export BSPWM_SOCKET="$SOCK"
 		# Point the test clients at this compositor, not at whatever

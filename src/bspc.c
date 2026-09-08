@@ -128,8 +128,8 @@ int main(int argc, char *argv[])
 		}
 
 		if (found) {
-			int ret = snprintf(sock_address.sun_path, sizeof(sock_address.sun_path),
-			                   SOCKET_PATH_TPL, host, dn, sn);
+			int ret = make_socket_path(sock_address.sun_path,
+			                           sizeof(sock_address.sun_path), host, dn, sn);
 			if (ret < 0 || (size_t)ret >= sizeof(sock_address.sun_path)) {
 				free(host);
 				err("Socket path too long.\n");

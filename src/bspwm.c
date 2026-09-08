@@ -130,7 +130,7 @@ static void preserve_state_file(const char *state_path)
 
 int main(int argc, char *argv[])
 {
-	char socket_path[MAXLEN];
+	char socket_path[MAXLEN] = {0};
 	bool socket_path_set = false;
 	char state_path[MAXLEN] = {0};
 	int run_level = 0;
@@ -212,29 +212,59 @@ int main(int argc, char *argv[])
 
 	dpy_fd = backend_get_fd();
 
-	if (sock_fd == -1) {
-		char *sp = getenv(SOCKET_ENV_VAR);
-		if (sp != NULL) {
-			snprintf(socket_path, sizeof(socket_path), "%s", sp);
-		} else {
-			char *host = NULL;
-			int dn = 0, sn = 0;
-			if (backend_parse_display(&host, &dn, &sn)) {
-				snprintf(socket_path, sizeof(socket_path), SOCKET_PATH_TPL, host, dn, sn);
+	/* Resolve the control-socket path. This must happen even on a restart
+	 * (sock_fd inherited via -o) so we can verify the path still names our
+	 * listening socket before reusing the inherited fd. */
+	char *sp = getenv(SOCKET_ENV_VAR);
+	if (sp != NULL) {
+		snprintf(socket_path, sizeof(socket_path), "%s", sp);
+	} else {
+		char *host = NULL;
+		int dn = 0, sn = 0;
+		if (backend_parse_display(&host, &dn, &sn)) {
+			int ret = make_socket_path(socket_path, sizeof(socket_path), host, dn, sn);
+			if (ret < 0 || (size_t)ret >= sizeof(socket_path)) {
+				free(host);
+				err("Socket path too long.\n");
 			}
-			free(host);
 		}
+		free(host);
+	}
 
-		sock_address.sun_family = AF_UNIX;
+	if (socket_path[0] == '\0') {
+		err("Couldn't determine the socket path.\n");
+	}
 
-		size_t socket_path_len = strlen(socket_path);
-		if (socket_path_len >= sizeof(sock_address.sun_path)) {
-			err("Socket path too long (%zu >= %zu): %s\n",
-			    socket_path_len, sizeof(sock_address.sun_path), socket_path);
+	sock_address.sun_family = AF_UNIX;
+
+	size_t socket_path_len = strlen(socket_path);
+	if (socket_path_len >= sizeof(sock_address.sun_path)) {
+		err("Socket path too long (%zu >= %zu): %s\n",
+		    socket_path_len, sizeof(sock_address.sun_path), socket_path);
+	}
+
+	strcpy(sock_address.sun_path, socket_path);
+
+	/* Decide whether to (re)bind. A fresh start has no inherited fd and always
+	 * binds. A restart inherits the already-bound listening socket via -o and
+	 * normally keeps reusing it (fast path, no client-visible disruption) — but
+	 * only while the path still exists on disk and is a socket. If the file was
+	 * removed (swept from /tmp, or unlinked by a racing fresh bind) the
+	 * inherited fd has no filesystem name: clients connecting by path fail
+	 * silently and keybinds die. A name cannot be re-attached to the existing
+	 * socket, so drop the stale fd and bind a fresh socket at the path. */
+	bool need_bind = (sock_fd == -1);
+	if (!need_bind) {
+		struct stat st;
+		if (stat(socket_path, &st) != 0 || !S_ISSOCK(st.st_mode)) {
+			warn("Socket path '%s' missing after restart; rebinding.\n", socket_path);
+			close(sock_fd);
+			sock_fd = -1;
+			need_bind = true;
 		}
+	}
 
-		strcpy(sock_address.sun_path, socket_path);
-
+	if (need_bind) {
 		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
 		if (sock_fd == -1) {
@@ -254,14 +284,13 @@ int main(int argc, char *argv[])
 		}
 
 		socket_path_set = true;
-
-		/* Hand the path to everything we spawn (config file, keybinds,
-		 * rules). bspc otherwise re-derives it from DISPLAY, which under
-		 * the wlroots backend names the Xwayland display while this socket
-		 * is named after the Wayland one: every bspc in the config failed
-		 * to connect. */
-		setenv(SOCKET_ENV_VAR, socket_path, true);
 	}
+
+	/* Hand the path to everything we spawn (config file, keybinds, rules).
+	 * bspc otherwise re-derives it from DISPLAY, which under the wlroots
+	 * backend names the Xwayland display while this socket is named after the
+	 * Wayland one: every bspc in the config failed to connect. */
+	setenv(SOCKET_ENV_VAR, socket_path, true);
 
 	fcntl(sock_fd, F_SETFD, FD_CLOEXEC | fcntl(sock_fd, F_GETFD));
 

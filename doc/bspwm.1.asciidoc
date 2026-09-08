@@ -1040,7 +1040,7 @@ Environment Variables
 ---------------------
 
 'BSPWM_SOCKET'::
-	The path of the socket used for the communication between *bspc* and *bspwm*. If it isn't defined, then the following path is used: '/tmp/bspwm<host_name>_<display_number>_<screen_number>-socket'.
+	The path of the socket used for the communication between *bspc* and *bspwm*. If it isn't defined, then the following path is used: '$XDG_RUNTIME_DIR/bspwm<host_name>_<display_number>_<screen_number>-socket' (falling back to '/tmp/bspwm<host_name>_<display_number>_<screen_number>-socket' when '$XDG_RUNTIME_DIR' is unset).
 
 Contributors
 ------------

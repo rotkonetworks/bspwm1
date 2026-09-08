@@ -32,6 +32,7 @@
 #include <fcntl.h>
 #include <ctype.h>
 #include "bspwm.h"
+#include "common.h"
 
 /* Mark as cold - rarely executed, improves instruction cache (nomt-style) */
 __attribute__((cold))
@@ -41,6 +42,22 @@ void warn(char *fmt, ...)
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
+}
+
+/* Build the control-socket path for the given display coordinates. Prefers
+ * $XDG_RUNTIME_DIR (per-user, 0700, not swept by the /tmp timer) and falls
+ * back to /tmp only when it is unset or empty. bspwm and bspc both resolve
+ * the path through here so they always agree. Returns the snprintf() result:
+ * negative on encoding error, or >= buflen when the path was truncated —
+ * callers must treat either as "path too long". Two literal format strings
+ * keep -Wformat=2 (-Wformat-nonliteral) quiet. */
+int make_socket_path(char *buf, size_t buflen, const char *host, int dn, int sn)
+{
+	const char *runtime = getenv("XDG_RUNTIME_DIR");
+	if (runtime != NULL && runtime[0] != '\0') {
+		return snprintf(buf, buflen, SOCKET_PATH_TPL_XDG, runtime, host, dn, sn);
+	}
+	return snprintf(buf, buflen, SOCKET_PATH_TPL, host, dn, sn);
 }
 
 __attribute__((cold, noreturn))
