@@ -100,6 +100,12 @@ int main(int argc, char *argv[])
 		err("Too many arguments (max %d).\n", MAX_ARGS);
 	}
 
+	/* Legacy /tmp candidate, tried only if the primary path has no listener.
+	 * It bridges an upgrade: a new bspc computes an $XDG_RUNTIME_DIR path while
+	 * an as-yet-unrestarted window manager is still bound under /tmp. Empty
+	 * when a BSPWM_SOCKET override is set or the primary is already /tmp. */
+	char legacy_path[sizeof(sock_address.sun_path)] = {0};
+
 	sock_address.sun_family = AF_UNIX;
 	char *sp = getenv(SOCKET_ENV_VAR);
 
@@ -139,6 +145,12 @@ int main(int argc, char *argv[])
 				free(host);
 				err("Socket path too long.\n");
 			}
+			int lret = snprintf(legacy_path, sizeof(legacy_path),
+			                    SOCKET_PATH_TPL, host, dn, sn);
+			if (lret < 0 || (size_t)lret >= sizeof(legacy_path) ||
+			    streq(legacy_path, sock_address.sun_path)) {
+				legacy_path[0] = '\0';
+			}
 		}
 		free(host);
 	}
@@ -148,13 +160,43 @@ int main(int argc, char *argv[])
 		return EXIT_SUCCESS;
 	}
 
-	if ((sock_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)) == -1) {
-		err("Failed to create the socket.\n");
+	/* Try the primary path, then the legacy /tmp path if one was set. A
+	 * stream socket cannot be reused after a failed connect, so each attempt
+	 * gets a fresh fd. */
+	const char *candidates[2];
+	int ncand = 0;
+	candidates[ncand++] = sock_address.sun_path;
+	if (legacy_path[0] != '\0') {
+		candidates[ncand++] = legacy_path;
 	}
 
-	if (connect(sock_fd, (struct sockaddr *) &sock_address, sizeof(sock_address)) == -1) {
-		close(sock_fd);
-		err("Failed to connect to the socket.\n");
+	sock_fd = -1;
+	for (int i = 0; i < ncand; i++) {
+		int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+		if (fd == -1) {
+			err("Failed to create the socket.\n");
+		}
+		struct sockaddr_un addr = {0};
+		addr.sun_family = AF_UNIX;
+		size_t len = strnlen(candidates[i], sizeof(addr.sun_path));
+		if (len >= sizeof(addr.sun_path)) {
+			close(fd);
+			continue;
+		}
+		memcpy(addr.sun_path, candidates[i], len);
+		if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) == 0) {
+			sock_fd = fd;
+			break;
+		}
+		close(fd);
+	}
+
+	if (sock_fd == -1) {
+		if (ncand == 2) {
+			err("Failed to connect to the socket (tried '%s' and '%s').\n",
+			    candidates[0], candidates[1]);
+		}
+		err("Failed to connect to the socket ('%s').\n", candidates[0]);
 	}
 
 	msg = malloc(msg_capacity);

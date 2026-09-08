@@ -245,26 +245,25 @@ int main(int argc, char *argv[])
 
 	strcpy(sock_address.sun_path, socket_path);
 
-	/* Decide whether to (re)bind. A fresh start has no inherited fd and always
-	 * binds. A restart inherits the already-bound listening socket via -o and
-	 * normally keeps reusing it (fast path, no client-visible disruption) — but
-	 * only while the path still exists on disk and is a socket. If the file was
-	 * removed (swept from /tmp, or unlinked by a racing fresh bind) the
-	 * inherited fd has no filesystem name: clients connecting by path fail
-	 * silently and keybinds die. A name cannot be re-attached to the existing
-	 * socket, so drop the stale fd and bind a fresh socket at the path. */
-	bool need_bind = (sock_fd == -1);
-	if (!need_bind) {
-		struct stat st;
-		if (stat(socket_path, &st) != 0 || !S_ISSOCK(st.st_mode)) {
-			warn("Socket path '%s' missing after restart; rebinding.\n", socket_path);
-			close(sock_fd);
-			sock_fd = -1;
-			need_bind = true;
-		}
+	/* Always bind a fresh socket, on both a fresh start and a restart.
+	 *
+	 * A restart inherits the previously bound listening socket via -o. Reusing
+	 * it avoids a momentary disruption, but the inherited fd's filesystem name
+	 * can be gone (swept from /tmp, or unlinked by a racing fresh bind) or —
+	 * worse — shadowed by a different, stale socket that still passes an
+	 * S_ISSOCK check while connect() by path reaches nothing. There is no
+	 * portable way to confirm that the path still names *our* socket
+	 * (getsockname reports the original bind name even after the entry is
+	 * gone), so any reuse check has a hole through which clients fail silently
+	 * and keybinds die. A bspc exchange is a sub-millisecond one-shot and
+	 * subscribers are dropped across a re-exec regardless, so rebinding costs
+	 * nothing observable and guarantees the path names the live socket. */
+	if (sock_fd != -1) {
+		close(sock_fd);
+		sock_fd = -1;
 	}
 
-	if (need_bind) {
+	{
 		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
 		if (sock_fd == -1) {
