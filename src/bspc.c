@@ -91,6 +91,11 @@ int main(int argc, char *argv[])
 		err("No arguments given.\n");
 	}
 
+	if (streq(argv[1], "-v") || streq(argv[1], "--version")) {
+		printf("%s\n", VERSION);
+		return EXIT_SUCCESS;
+	}
+
 	if (argc > MAX_ARGS) {
 		err("Too many arguments (max %d).\n", MAX_ARGS);
 	}
