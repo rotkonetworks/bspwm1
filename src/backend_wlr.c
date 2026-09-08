@@ -1941,6 +1941,7 @@ void backend_destroy(void)
 		wl_list_remove(&server.new_input.link);
 		wl_list_remove(&server.request_cursor.link);
 		wl_list_remove(&server.request_set_selection.link);
+		wl_list_remove(&server.request_set_primary_selection.link);
 		wl_list_remove(&server.new_output.link);
 		wl_list_remove(&server.new_xdg_toplevel.link);
 		wl_list_remove(&server.new_xdg_popup.link);
@@ -1948,8 +1949,14 @@ void backend_destroy(void)
 		wl_list_remove(&server.new_layer_surface.link);
 		wl_list_remove(&server.xdg_activation_request.link);
 		wl_list_remove(&server.new_lock.link);
+		wl_list_remove(&server.output_power_set_mode.link);
+		wl_list_remove(&server.cursor_shape_request.link);
+		wl_list_remove(&server.gamma_set.link);
+		wl_list_remove(&server.output_mgr_apply.link);
+		wl_list_remove(&server.output_mgr_test.link);
 		if (server.xwayland) {
 			wl_list_remove(&server.xwayland_new_surface.link);
+			wl_list_remove(&server.xwayland_ready.link);
 		}
 
 		wlr_scene_node_destroy(&server.scene->tree.node);
@@ -2530,7 +2537,7 @@ uint32_t backend_get_color_pixel(const char *color)
 {
 	unsigned int red, green, blue;
 	if (sscanf(color + 1, "%02x%02x%02x", &red, &green, &blue) == 3) {
-		return (0xFF << 24) | (red << 16 | green << 8 | blue);
+		return ((uint32_t)0xFF << 24) | ((uint32_t)red << 16) | ((uint32_t)green << 8) | (uint32_t)blue;
 	}
 	return 0xFF000000;
 }
