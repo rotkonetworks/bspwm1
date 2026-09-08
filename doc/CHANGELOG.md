@@ -1,3 +1,35 @@
+# v1.6.2
+
+Bug-fix release for the wlroots compositor, from multi-window use and a
+sanitizer (ASAN/UBSAN) pass. X11 is unaffected.
+
+### Fixed
+
+- **Tiled windows did not fill their cell**, so gaps between windows and the
+  right/bottom margins looked doubled and the layout was unbalanced. The
+  border box was sized from the client's committed surface, and clients like
+  foot round down to whole character cells unless told they are tiled; the
+  shortfall piled onto the right and bottom edges. `bspwm-wl` now sizes the
+  border box from the size the WM requested and marks tiled clients with
+  `wlr_xdg_toplevel_set_tiled`, so every margin and gap equals `window_gap`.
+- **Focused and unfocused borders were indistinguishable.** `get_border_color`
+  in the wlroots path keyed the active color on the monitor, so every
+  unfocused window on the current monitor drew with `active_border_color`
+  instead of `normal_border_color`. It now matches the X11 backend: active is
+  only for the focused node of an unfocused monitor.
+- **Undefined behavior in `backend_get_color_pixel`:** `0xFF << 24` shifted
+  into the sign bit of `int`. Computed in `uint32_t` now.
+- **Clean quit aborted with a wlroots assertion.** `backend_destroy` removed
+  only some of its `wl_signal` listeners before destroying the display, so
+  `bspc quit` / SIGTERM hit `wlr_seat_destroy`'s
+  `request_set_primary_selection` assertion (and left several other listeners
+  attached). All server listeners are now removed on teardown.
+- **Per-output startup leak / teardown churn.** `server_new_output` built the
+  monitor tree from a backend event fired inside `backend_init`, before
+  `setup()`, which then orphaned it; and `output_destroy` rebuilt it after
+  `cleanup()`. Both now guard the tree rebuild with `running`, while still
+  publishing outputs to wlr-output-management clients.
+
 # v1.6.1
 
 Fixes found by running bspwm-wl as a real session on bare DRM hardware, plus
