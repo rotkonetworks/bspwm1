@@ -28,6 +28,9 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 cleanup() {
+	if [ -n "${CLEANUP_XDG_RUNTIME_DIR:-}" ]; then
+		rm -rf "$CLEANUP_XDG_RUNTIME_DIR"
+	fi
 	if [ -n "$BSPWM_PID" ]; then
 		kill "$BSPWM_PID" 2>/dev/null || true
 		wait "$BSPWM_PID" 2>/dev/null || true
@@ -64,6 +67,15 @@ elif [ "$BACKEND" = "wlroots" ]; then
 	export WLR_HEADLESS_OUTPUTS=1
 	# No DISPLAY needed — bspwm sets WAYLAND_DISPLAY itself
 	unset DISPLAY
+	# wlroots needs XDG_RUNTIME_DIR for its Wayland socket and has no
+	# fallback. A bare CI container (GitHub Actions) does not set it, so
+	# provide a private one when it is missing.
+	if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -d "${XDG_RUNTIME_DIR:-}" ]; then
+		XDG_RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/bspwm-xdg.XXXXXX")
+		chmod 700 "$XDG_RUNTIME_DIR"
+		export XDG_RUNTIME_DIR
+		CLEANUP_XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"
+	fi
 	printf "%b\n" "${YELLOW}=== Testing wlroots backend (headless) ===${NC}"
 else
 	echo "Usage: $0 [x11|wlroots]"
