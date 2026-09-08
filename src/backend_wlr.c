@@ -78,6 +78,7 @@
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_output_management_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/util/edges.h>
 #include <wlr/xwayland.h>
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
@@ -106,6 +107,18 @@ struct bspwm_wlr_toplevel {
 	struct wlr_scene_rect *border[4];
 	uint32_t border_width;
 	float border_color[4];
+
+	/* Size the WM core last requested via move_resize/resize. The border
+	 * box is drawn to this size (not the client's committed geometry) so a
+	 * client that quantizes or ignores the configure — foot rounds to whole
+	 * character cells unless told it is tiled — still yields the same
+	 * on-screen footprint as the X11 backend: the full tile rectangle. */
+	int req_width;
+	int req_height;
+	/* Last tiled-edge bitfield sent to the client (enum wlr_edges), or
+	 * UINT32_MAX before the first move_resize so the first state is always
+	 * pushed. Telling tiled clients they are tiled stops the cell-rounding. */
+	uint32_t tiled_edges;
 
 	struct wl_listener map;
 	struct wl_listener unmap;
@@ -317,8 +330,14 @@ static void toplevel_update_borders(struct bspwm_wlr_toplevel *tl)
 		return;
 	}
 
-	int w = tl->xdg_toplevel->base->geometry.width;
-	int h = tl->xdg_toplevel->base->geometry.height;
+	/* Size the border box from the size the WM core requested, so the
+	 * footprint (surface + border) always equals the tile rectangle the
+	 * layout computed — exactly like the X11 backend, where the server
+	 * honours the WM configure regardless of what the client asks for.
+	 * Fall back to the client's committed geometry only before the first
+	 * move_resize (req_* still 0), e.g. a floating window sizing itself. */
+	int w = tl->req_width  > 0 ? tl->req_width  : tl->xdg_toplevel->base->geometry.width;
+	int h = tl->req_height > 0 ? tl->req_height : tl->xdg_toplevel->base->geometry.height;
 	if (w <= 0 || h <= 0) return;
 
 	int total_w = w + 2 * (int)bw;
@@ -354,6 +373,29 @@ static void toplevel_set_border_color(struct bspwm_wlr_toplevel *tl, uint32_t pi
 	memcpy(tl->border_color, color, sizeof(color));
 	for (int i = 0; i < 4; i++) {
 		wlr_scene_rect_set_color(tl->border[i], color);
+	}
+}
+
+/* Tell the client whether it is tiled. Tiled clients (foot, and other
+ * terminals) must not round their surface down to whole character cells,
+ * otherwise the committed surface is smaller than the tile and the unused
+ * strip shows up as an enlarged gap on the right/bottom edges. This mirrors
+ * the X11 backend, where the server enforces the WM-configured size. Only
+ * re-sends when the edge set actually changes, to avoid configure spam. */
+static void toplevel_apply_tiled(struct bspwm_wlr_toplevel *tl)
+{
+	uint32_t edges = 0;
+	coordinates_t loc;
+	if (locate_window(tl->id, &loc) && loc.node && loc.node->client) {
+		client_state_t s = loc.node->client->state;
+		if (s == STATE_TILED || s == STATE_PSEUDO_TILED || s == STATE_FULLSCREEN) {
+			edges = WLR_EDGE_TOP | WLR_EDGE_BOTTOM |
+			        WLR_EDGE_LEFT | WLR_EDGE_RIGHT;
+		}
+	}
+	if (edges != tl->tiled_edges) {
+		tl->tiled_edges = edges;
+		wlr_xdg_toplevel_set_tiled(tl->xdg_toplevel, edges);
 	}
 }
 
@@ -708,6 +750,7 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data)
 
 	tl->id = ++server.next_toplevel_id;
 	tl->xdg_toplevel = xdg_toplevel;
+	tl->tiled_edges = UINT32_MAX; /* force the first set_tiled */
 
 	/* Container tree holds borders + surface */
 	tl->scene_tree = wlr_scene_tree_create(&server.scene->tree);
@@ -2026,7 +2069,11 @@ void backend_window_resize(bspwm_wid_t win, uint16_t w, uint16_t h)
 {
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (tl) {
+		tl->req_width = w;
+		tl->req_height = h;
 		wlr_xdg_toplevel_set_size(tl->xdg_toplevel, w, h);
+		toplevel_apply_tiled(tl);
+		toplevel_update_borders(tl);
 		return;
 	}
 	struct bspwm_wlr_presel *p = presel_from_id(win);
@@ -2042,7 +2089,11 @@ void backend_window_move_resize(bspwm_wid_t win, int16_t x, int16_t y, uint16_t 
 		if (tl->scene_tree) {
 			wlr_scene_node_set_position(&tl->scene_tree->node, x, y);
 		}
+		tl->req_width = w;
+		tl->req_height = h;
 		wlr_xdg_toplevel_set_size(tl->xdg_toplevel, w, h);
+		toplevel_apply_tiled(tl);
+		toplevel_update_borders(tl);
 		return;
 	}
 	struct bspwm_wlr_presel *p = presel_from_id(win);
