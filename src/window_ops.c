@@ -180,7 +180,7 @@ uint32_t get_border_color(bool focused_node, bool focused_monitor)
 {
 	if (focused_monitor && focused_node)
 		return backend_get_color_pixel(focused_border_color);
-	else if (focused_monitor)
+	else if (focused_node)
 		return backend_get_color_pixel(active_border_color);
 	else
 		return backend_get_color_pixel(normal_border_color);
