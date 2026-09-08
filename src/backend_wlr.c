@@ -41,6 +41,7 @@
 #include <linux/input-event-codes.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
+#include <wlr/backend/session.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_compositor.h>
@@ -186,6 +187,7 @@ static struct {
 	struct wl_display *wl_display;
 	struct wl_event_loop *wl_event_loop;
 	struct wlr_backend *backend;
+	struct wlr_session *session;   /* NULL when nested (X11/headless) */
 	struct wlr_renderer *renderer;
 	struct wlr_allocator *allocator;
 	struct wlr_compositor *compositor;
@@ -656,6 +658,11 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data)
 		tl->decoration = NULL;
 	}
 	wl_list_remove(&tl->link);
+	/* Destroy the container scene tree (borders + surface). Without this the
+	 * border rectangles keep rendering after the window is gone. */
+	if (tl->scene_tree != NULL) {
+		wlr_scene_node_destroy(&tl->scene_tree->node);
+	}
 	free(tl);
 }
 
@@ -785,6 +792,24 @@ static void keyboard_key(struct wl_listener *listener, void *data)
 	struct wlr_keyboard_key_event *event = data;
 
 	wlr_seat_set_keyboard(server.seat, kb->wlr_keyboard);
+
+	/* VT switch: Ctrl+Alt+F1..F12. The keymap emits XF86Switch_VT_n at the
+	 * Ctrl+Alt level; act on it before anything else so the user can always
+	 * leave the compositor, even from a lock screen. wlr_session is NULL when
+	 * nested (X11/headless backend), where the host handles VT switching. */
+	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED && server.session != NULL) {
+		const xkb_keysym_t *vtsyms = NULL;
+		int nvt = xkb_state_key_get_syms(kb->wlr_keyboard->xkb_state,
+			event->keycode + 8, &vtsyms);
+		for (int i = 0; i < nvt; i++) {
+			if (vtsyms[i] >= XKB_KEY_XF86Switch_VT_1 &&
+			    vtsyms[i] <= XKB_KEY_XF86Switch_VT_12) {
+				wlr_session_change_vt(server.session,
+					vtsyms[i] - XKB_KEY_XF86Switch_VT_1 + 1);
+				return;
+			}
+		}
+	}
 
 	/* When locked, forward all keys to the lock surface only */
 	if (server.locked) {
@@ -1658,7 +1683,7 @@ int backend_init(int *default_screen)
 	if (!server.wl_display) return -1;
 
 	server.backend = wlr_backend_autocreate(
-		wl_display_get_event_loop(server.wl_display), NULL);
+		wl_display_get_event_loop(server.wl_display), &server.session);
 	if (!server.backend) {
 		wl_display_destroy(server.wl_display);
 		return -1;
