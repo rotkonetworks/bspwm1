@@ -19,6 +19,11 @@ found by running it nested inside an X session with a full desktop config.
   `WLROOTS_DIR` still selects a source checkout. `pkg/arch/bspwm1-wl` is the
   matching AUR package.
 - `bspc` parses `DISPLAY` itself and no longer links libxcb.
+- **The control socket lives in `$XDG_RUNTIME_DIR`** now, falling back to
+  `/tmp` only when that is unset. `/tmp` is world-writable and swept by the
+  systemd-tmpfiles timer, which could remove a live socket out from under a
+  running session. `bspwm` and `bspc` resolve the path through one shared
+  helper so they always agree; `BSPWM_SOCKET` still overrides both.
 - Wayland protocols: xdg-output, wlr-output-management, primary selection,
   wlr and ext data-control, presentation-time, single-pixel-buffer, output
   power management, cursor-shape, gamma control. Verified nested with
@@ -47,6 +52,13 @@ found by running it nested inside an X session with a full desktop config.
 - `tests/run_headless`: the wlroots run picks the right binary, exports
   `WAYLAND_DISPLAY` for its clients, no longer trips on an undefined
   variable in the focus test, and prints colours under plain `sh`.
+- **A restart could leave IPC with no reachable socket, silently killing
+  keybinds.** On `bspc wm -r` the WM re-execs and inherits the listening
+  socket via `-o`, then skipped binding entirely and relied on the socket
+  file still being on disk. If that file was gone (swept from `/tmp`, or
+  unlinked by a racing fresh bind) the server kept listening on a nameless
+  socket while every `bspc` connect failed with no error. It now checks the
+  path on restart and rebinds a fresh socket when it is missing.
 - `max_tiles_per_desktop` accepted at most 8, which was also its default.
   The bound is now 64. A desktop with the limit enabled but the value left
   at 0 (what a rejected config command leaves behind) no longer floats every
