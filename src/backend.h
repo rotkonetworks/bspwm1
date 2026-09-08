@@ -284,6 +284,8 @@ bool backend_get_window_type(bspwm_wid_t win, bspwm_window_type_t *type);
 void backend_ewmh_init(void);
 void backend_ewmh_update_active_window(bspwm_wid_t win);
 void backend_ewmh_update_number_of_desktops(uint32_t count);
+/* wlroots only: publish desktops through ext-workspace-v1 (waybar ext/workspaces). */
+void backend_workspaces_update(void);
 void backend_ewmh_update_current_desktop(uint32_t index);
 void backend_ewmh_update_desktop_names(const char *names, size_t len);
 void backend_ewmh_update_desktop_viewport(void);

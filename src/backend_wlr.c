@@ -77,6 +77,8 @@
 #include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_output_management_v1.h>
+#include <wlr/types/wlr_ext_workspace_v1.h>
+#include "ext-workspace-v1-protocol.h"
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/edges.h>
 #include <wlr/xwayland.h>
@@ -128,6 +130,12 @@ struct bspwm_wlr_toplevel {
 	struct wl_listener request_resize;
 	struct wl_listener request_maximize;
 	struct wl_listener request_fullscreen;
+	struct wl_listener set_title;
+	struct wl_listener set_app_id;
+	/* foreign-toplevel requests (taskbar clicks); valid while foreign_handle is */
+	struct wl_listener foreign_request_activate;
+	struct wl_listener foreign_request_close;
+	struct wlr_output *foreign_output;
 
 	/* xdg-decoration object, if the client created one. The mode can only
 	 * be sent once the surface is initialized (after its initial commit),
@@ -142,6 +150,24 @@ struct bspwm_wlr_popup {
 	struct wlr_xdg_popup *xdg_popup;
 	struct wl_listener commit;
 	struct wl_listener destroy;
+};
+
+/* ext-workspace-v1: one group per monitor, one workspace per desktop. */
+struct bspwm_wlr_ws_group {
+	uint32_t mon_id;
+	struct wlr_output *output;
+	struct wlr_ext_workspace_group_handle_v1 *group;
+	struct wl_list link;
+};
+
+struct bspwm_wlr_ws {
+	uint32_t desk_id;
+	struct wlr_ext_workspace_handle_v1 *ws;
+	struct wlr_ext_workspace_group_handle_v1 *group;
+	char name[SMALEN];
+	uint32_t coord;
+	bool active, urgent;
+	struct wl_list link;
 };
 
 struct bspwm_wlr_output {
@@ -237,6 +263,19 @@ static struct {
 	struct wlr_output_manager_v1 *output_mgr;
 	struct wl_listener output_mgr_apply;
 	struct wl_listener output_mgr_test;
+
+	/* All managed windows (xdg and xwayland) live under this tree, which sits
+	 * between the bottom and top layer-shell trees. */
+	struct wlr_scene_tree *window_tree;
+	/* Mapped layer surface that currently holds keyboard focus (wofi, rofi,
+	 * a lock screen), or NULL. While set, window focus changes from the
+	 * core are recorded but not applied to the seat. */
+	struct bspwm_wlr_layer_surface *focused_layer;
+
+	struct wlr_ext_workspace_manager_v1 *workspace_mgr;
+	struct wl_listener workspace_commit;
+	struct wl_list ws_groups;   /* bspwm_wlr_ws_group.link */
+	struct wl_list workspaces;  /* bspwm_wlr_ws.link */
 	struct wl_list keyboards;
 
 	struct wlr_output_layout *output_layout;
@@ -442,6 +481,7 @@ static struct bspwm_wlr_toplevel *toplevel_from_id(bspwm_wid_t id)
 /* Forward decl: output state/mode changes need to re-arrange layers so
  * that exclusive-zone padding tracks the new resolution. */
 static void arrange_layers(struct bspwm_wlr_output *output);
+static void workspace_commit(struct wl_listener *listener, void *data);
 
 static void output_frame(struct wl_listener *listener, void *data)
 {
@@ -644,6 +684,64 @@ static void server_new_output(struct wl_listener *listener, void *data)
 /*  XDG toplevel (window) handling                                    */
 /* ------------------------------------------------------------------ */
 
+/* Tell taskbars which output the window is on. waybar's wlr/taskbar only
+ * lists toplevels that have entered the bar's own output. */
+static void toplevel_update_foreign_output(struct bspwm_wlr_toplevel *tl)
+{
+	if (!tl->foreign_handle) return;
+	int lx, ly;
+	wlr_scene_node_coords(&tl->scene_tree->node, &lx, &ly);
+	struct wlr_box geo = tl->xdg_toplevel->base->geometry;
+	struct wlr_output *out = wlr_output_layout_output_at(server.output_layout,
+		lx + geo.width / 2.0, ly + geo.height / 2.0);
+	if (!out) {
+		out = wlr_output_layout_output_at(server.output_layout, lx, ly);
+	}
+	if (out == tl->foreign_output) return;
+	if (tl->foreign_output) {
+		wlr_foreign_toplevel_handle_v1_output_leave(tl->foreign_handle, tl->foreign_output);
+	}
+	if (out) {
+		wlr_foreign_toplevel_handle_v1_output_enter(tl->foreign_handle, out);
+	}
+	tl->foreign_output = out;
+}
+
+static void foreign_request_activate(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_toplevel *tl = wl_container_of(listener, tl, foreign_request_activate);
+	(void)data;
+	coordinates_t loc;
+	if (locate_window(tl->id, &loc)) {
+		focus_node(loc.monitor, loc.desktop, loc.node);
+	}
+}
+
+static void foreign_request_close(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_toplevel *tl = wl_container_of(listener, tl, foreign_request_close);
+	(void)data;
+	wlr_xdg_toplevel_send_close(tl->xdg_toplevel);
+}
+
+static void xdg_toplevel_set_title(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_toplevel *tl = wl_container_of(listener, tl, set_title);
+	(void)data;
+	if (tl->foreign_handle && tl->xdg_toplevel->title) {
+		wlr_foreign_toplevel_handle_v1_set_title(tl->foreign_handle, tl->xdg_toplevel->title);
+	}
+}
+
+static void xdg_toplevel_set_app_id(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_toplevel *tl = wl_container_of(listener, tl, set_app_id);
+	(void)data;
+	if (tl->foreign_handle && tl->xdg_toplevel->app_id) {
+		wlr_foreign_toplevel_handle_v1_set_app_id(tl->foreign_handle, tl->xdg_toplevel->app_id);
+	}
+}
+
 static void xdg_toplevel_map(struct wl_listener *listener, void *data)
 {
 	struct bspwm_wlr_toplevel *tl = wl_container_of(listener, tl, map);
@@ -660,6 +758,12 @@ static void xdg_toplevel_map(struct wl_listener *listener, void *data)
 			if (tl->xdg_toplevel->app_id)
 				wlr_foreign_toplevel_handle_v1_set_app_id(tl->foreign_handle,
 					tl->xdg_toplevel->app_id);
+			tl->foreign_request_activate.notify = foreign_request_activate;
+			wl_signal_add(&tl->foreign_handle->events.request_activate, &tl->foreign_request_activate);
+			tl->foreign_request_close.notify = foreign_request_close;
+			wl_signal_add(&tl->foreign_handle->events.request_close, &tl->foreign_request_close);
+			tl->foreign_output = NULL;
+			toplevel_update_foreign_output(tl);
 		}
 	}
 
@@ -673,8 +777,11 @@ static void xdg_toplevel_unmap(struct wl_listener *listener, void *data)
 	(void)data;
 
 	if (tl->foreign_handle) {
+		wl_list_remove(&tl->foreign_request_activate.link);
+		wl_list_remove(&tl->foreign_request_close.link);
 		wlr_foreign_toplevel_handle_v1_destroy(tl->foreign_handle);
 		tl->foreign_handle = NULL;
+		tl->foreign_output = NULL;
 	}
 
 	unmanage_window(tl->id);
@@ -715,6 +822,8 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&tl->request_resize.link);
 	wl_list_remove(&tl->request_maximize.link);
 	wl_list_remove(&tl->request_fullscreen.link);
+	wl_list_remove(&tl->set_title.link);
+	wl_list_remove(&tl->set_app_id.link);
 	if (tl->decoration) {
 		wl_list_remove(&tl->decoration_destroy.link);
 		tl->decoration = NULL;
@@ -773,7 +882,7 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data)
 	tl->tiled_edges = UINT32_MAX; /* force the first set_tiled */
 
 	/* Container tree holds borders + surface */
-	tl->scene_tree = wlr_scene_tree_create(&server.scene->tree);
+	tl->scene_tree = wlr_scene_tree_create(server.window_tree);
 	tl->scene_tree->node.data = tl;
 
 	/* Surface tree is a child, offset by border width */
@@ -799,6 +908,10 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data)
 	wl_signal_add(&xdg_toplevel->events.request_maximize, &tl->request_maximize);
 	tl->request_fullscreen.notify = xdg_toplevel_request_fullscreen;
 	wl_signal_add(&xdg_toplevel->events.request_fullscreen, &tl->request_fullscreen);
+	tl->set_title.notify = xdg_toplevel_set_title;
+	wl_signal_add(&xdg_toplevel->events.set_title, &tl->set_title);
+	tl->set_app_id.notify = xdg_toplevel_set_app_id;
+	wl_signal_add(&xdg_toplevel->events.set_app_id, &tl->set_app_id);
 
 	wl_list_insert(&server.toplevels, &tl->link);
 }
@@ -1404,12 +1517,25 @@ static void arrange_layers(struct bspwm_wlr_output *output)
 	}
 }
 
+static void layer_surface_focus(struct bspwm_wlr_layer_surface *ls);
+
 static void layer_surface_commit(struct wl_listener *listener, void *data)
 {
 	struct bspwm_wlr_layer_surface *ls = wl_container_of(listener, ls, commit);
 	(void)data;
 
 	if (!ls->layer_surface->initialized) return;
+
+	if (ls->layer_surface->surface->mapped) {
+		bool wants = ls->layer_surface->current.keyboard_interactive !=
+			ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+		if (wants && server.focused_layer != ls) {
+			layer_surface_focus(ls);
+		} else if (!wants && server.focused_layer == ls) {
+			server.focused_layer = NULL;
+			update_input_focus();
+		}
+	}
 
 	/* A client can call zwlr_layer_surface_v1::set_layer() to move
 	 * between layers after the initial map. The scene helper was
@@ -1434,20 +1560,51 @@ static void layer_surface_commit(struct wl_listener *listener, void *data)
 	}
 }
 
+/* Give the seat's keyboard to a layer surface that asked for it (wofi,
+ * rofi, swaylock's lock surface). Without this the launcher draws but every
+ * key still goes to the focused window, so nothing can be typed or picked. */
+static void layer_surface_focus(struct bspwm_wlr_layer_surface *ls)
+{
+	struct wlr_surface *surface = ls->layer_surface->surface;
+	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server.seat);
+	server.focused_layer = ls;
+	if (keyboard) {
+		wlr_seat_keyboard_notify_enter(server.seat, surface,
+			keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+	} else {
+		wlr_seat_keyboard_notify_enter(server.seat, surface, NULL, 0, NULL);
+	}
+}
+
 static void layer_surface_map(struct wl_listener *listener, void *data)
 {
-	(void)listener; (void)data;
+	struct bspwm_wlr_layer_surface *ls = wl_container_of(listener, ls, map);
+	(void)data;
+	if (ls->layer_surface->current.keyboard_interactive !=
+	    ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE) {
+		layer_surface_focus(ls);
+	}
 }
 
 static void layer_surface_unmap(struct wl_listener *listener, void *data)
 {
-	(void)listener; (void)data;
+	struct bspwm_wlr_layer_surface *ls = wl_container_of(listener, ls, unmap);
+	(void)data;
+	if (server.focused_layer == ls) {
+		server.focused_layer = NULL;
+		/* Hand the keyboard back to whatever the core considers focused. */
+		update_input_focus();
+	}
 }
 
 static void layer_surface_destroy(struct wl_listener *listener, void *data)
 {
 	struct bspwm_wlr_layer_surface *ls = wl_container_of(listener, ls, destroy);
 	(void)data;
+	if (server.focused_layer == ls) {
+		server.focused_layer = NULL;
+		update_input_focus();
+	}
 
 	/* Remember which output this lived on; we need to re-arrange after
 	 * it's gone so the freed exclusive zone is reclaimed by tiled
@@ -1596,7 +1753,7 @@ static void xwayland_surface_associate(struct wl_listener *listener, void *data)
 	/* Surface is now valid — create scene tree */
 	if (!xs->scene_tree && xs->xsurface->surface) {
 		xs->scene_tree = wlr_scene_subsurface_tree_create(
-			&server.scene->tree, xs->xsurface->surface);
+			server.window_tree, xs->xsurface->surface);
 		if (xs->scene_tree) {
 			xs->scene_tree->node.data = xs;
 		}
@@ -1786,6 +1943,7 @@ int backend_init(int *default_screen)
 	/* Layer shell scene trees (ordered bottom to top in scene graph) */
 	server.layer_trees[0] = wlr_scene_tree_create(&server.scene->tree); /* background */
 	server.layer_trees[1] = wlr_scene_tree_create(&server.scene->tree); /* bottom */
+	server.window_tree = wlr_scene_tree_create(&server.scene->tree);    /* windows */
 
 	/* XDG shell (toplevels render between bottom and top layers) */
 	wl_list_init(&server.toplevels);
@@ -1892,6 +2050,12 @@ int backend_init(int *default_screen)
 	server.gamma_mgr = wlr_gamma_control_manager_v1_create(server.wl_display);
 	server.gamma_set.notify = gamma_set;
 	wl_signal_add(&server.gamma_mgr->events.set_gamma, &server.gamma_set);
+
+	wl_list_init(&server.ws_groups);
+	wl_list_init(&server.workspaces);
+	server.workspace_mgr = wlr_ext_workspace_manager_v1_create(server.wl_display, 1);
+	server.workspace_commit.notify = workspace_commit;
+	wl_signal_add(&server.workspace_mgr->events.commit, &server.workspace_commit);
 
 	server.output_mgr = wlr_output_manager_v1_create(server.wl_display);
 	server.output_mgr_apply.notify = output_manager_apply;
@@ -2111,6 +2275,14 @@ void backend_window_resize(bspwm_wid_t win, uint16_t w, uint16_t h)
 
 void backend_window_move_resize(bspwm_wid_t win, int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
+	{
+		struct bspwm_wlr_toplevel *ftl = toplevel_from_id(win);
+		if (ftl) {
+			/* Position first so the output lookup below sees the new place. */
+			wlr_scene_node_set_position(&ftl->scene_tree->node, x, y);
+			toplevel_update_foreign_output(ftl);
+		}
+	}
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (tl) {
 		if (tl->scene_tree) {
@@ -2224,6 +2396,10 @@ void backend_set_input_focus(bspwm_wid_t win)
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (!tl) return;
 
+	/* A launcher or lock surface holds the keyboard; the core's choice is
+	 * re-applied from update_input_focus() when it goes away. */
+	if (server.focused_layer) return;
+
 	struct wlr_surface *surface = tl->xdg_toplevel->base->surface;
 	struct wlr_seat *seat = server.seat;
 
@@ -2253,6 +2429,7 @@ void backend_set_input_focus(bspwm_wid_t win)
 
 void backend_clear_input_focus(void)
 {
+	if (server.focused_layer) return;
 	struct wlr_surface *prev = server.seat->keyboard_state.focused_surface;
 	if (prev) {
 		struct wlr_xdg_toplevel *prev_tl =
@@ -2384,6 +2561,140 @@ void backend_ewmh_init(void) {}
 void backend_ewmh_update_active_window(bspwm_wid_t win) { (void)win; }
 void backend_ewmh_update_number_of_desktops(uint32_t count) { (void)count; }
 void backend_ewmh_update_current_desktop(uint32_t index) { (void)index; }
+
+/* ---- ext-workspace-v1: desktops as workspaces for waybar & co. ---- */
+
+static struct wlr_output *wlr_output_from_output_id(bspwm_output_id_t id)
+{
+	struct bspwm_wlr_output *out;
+	wl_list_for_each(out, &server.outputs, link) {
+		if (out->id == id) return out->wlr_output;
+	}
+	return NULL;
+}
+
+static bool desktop_exists(uint32_t id, monitor_t **mp, desktop_t **dp)
+{
+	for (monitor_t *m = mon_head; m; m = m->next) {
+		for (desktop_t *d = m->desk_head; d; d = d->next) {
+			if (d->id == id) {
+				if (mp) *mp = m;
+				if (dp) *dp = d;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void backend_workspaces_update(void)
+{
+	if (!server.workspace_mgr) return;
+
+	/* Drop groups and workspaces whose monitor or desktop is gone. */
+	struct bspwm_wlr_ws_group *g, *gtmp;
+	wl_list_for_each_safe(g, gtmp, &server.ws_groups, link) {
+		bool alive = false;
+		for (monitor_t *m = mon_head; m; m = m->next) {
+			if (m->id == g->mon_id) { alive = true; break; }
+		}
+		if (!alive) {
+			wl_list_remove(&g->link);
+			wlr_ext_workspace_group_handle_v1_destroy(g->group);
+			free(g);
+		}
+	}
+	struct bspwm_wlr_ws *w, *wtmp;
+	wl_list_for_each_safe(w, wtmp, &server.workspaces, link) {
+		if (!desktop_exists(w->desk_id, NULL, NULL)) {
+			wl_list_remove(&w->link);
+			wlr_ext_workspace_handle_v1_destroy(w->ws);
+			free(w);
+		}
+	}
+
+	for (monitor_t *m = mon_head; m; m = m->next) {
+		struct bspwm_wlr_ws_group *grp = NULL;
+		wl_list_for_each(g, &server.ws_groups, link) {
+			if (g->mon_id == m->id) { grp = g; break; }
+		}
+		struct wlr_output *out = wlr_output_from_output_id(m->output_id);
+		if (!grp) {
+			grp = calloc(1, sizeof(*grp));
+			if (!grp) continue;
+			grp->mon_id = m->id;
+			grp->group = wlr_ext_workspace_group_handle_v1_create(server.workspace_mgr, 0);
+			if (!grp->group) { free(grp); continue; }
+			wl_list_insert(&server.ws_groups, &grp->link);
+		}
+		if (grp->output != out) {
+			if (grp->output) wlr_ext_workspace_group_handle_v1_output_leave(grp->group, grp->output);
+			if (out) wlr_ext_workspace_group_handle_v1_output_enter(grp->group, out);
+			grp->output = out;
+		}
+
+		uint32_t idx = 0;
+		for (desktop_t *d = m->desk_head; d; d = d->next, idx++) {
+			struct bspwm_wlr_ws *ws = NULL;
+			wl_list_for_each(w, &server.workspaces, link) {
+				if (w->desk_id == d->id) { ws = w; break; }
+			}
+			if (!ws) {
+				ws = calloc(1, sizeof(*ws));
+				if (!ws) continue;
+				char id[16];
+				snprintf(id, sizeof(id), "%u", d->id);
+				ws->desk_id = d->id;
+				ws->ws = wlr_ext_workspace_handle_v1_create(server.workspace_mgr, id,
+					EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_ACTIVATE);
+				if (!ws->ws) { free(ws); continue; }
+				ws->ws->data = ws;
+				ws->coord = UINT32_MAX;
+				wl_list_insert(&server.workspaces, &ws->link);
+			}
+			if (ws->group != grp->group) {
+				wlr_ext_workspace_handle_v1_set_group(ws->ws, grp->group);
+				ws->group = grp->group;
+			}
+			if (strncmp(ws->name, d->name, sizeof(ws->name)) != 0) {
+				snprintf(ws->name, sizeof(ws->name), "%s", d->name);
+				wlr_ext_workspace_handle_v1_set_name(ws->ws, d->name);
+			}
+			if (ws->coord != idx) {
+				ws->coord = idx;
+				wlr_ext_workspace_handle_v1_set_coordinates(ws->ws, &idx, 1);
+			}
+			bool active = (d == m->desk);
+			bool urgent = d->urgent_count > 0;
+			if (ws->active != active) {
+				ws->active = active;
+				wlr_ext_workspace_handle_v1_set_active(ws->ws, active);
+			}
+			if (ws->urgent != urgent) {
+				ws->urgent = urgent;
+				wlr_ext_workspace_handle_v1_set_urgent(ws->ws, urgent);
+			}
+		}
+	}
+}
+
+static void workspace_commit(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	struct wlr_ext_workspace_v1_commit_event *event = data;
+	struct wlr_ext_workspace_v1_request *req;
+	wl_list_for_each(req, event->requests, link) {
+		if (req->type != WLR_EXT_WORKSPACE_V1_REQUEST_ACTIVATE || !req->activate.workspace) {
+			continue;
+		}
+		struct bspwm_wlr_ws *ws = req->activate.workspace->data;
+		monitor_t *m; desktop_t *d;
+		if (ws && desktop_exists(ws->desk_id, &m, &d)) {
+			focus_node(m, d, NULL);
+		}
+	}
+	backend_workspaces_update();
+}
 void backend_ewmh_update_desktop_names(const char *names, size_t len) { (void)names; (void)len; }
 void backend_ewmh_update_desktop_viewport(void) {}
 void backend_ewmh_set_wm_desktop(bspwm_wid_t win, uint32_t desktop) { (void)win; (void)desktop; }

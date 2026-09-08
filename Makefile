@@ -44,7 +44,9 @@ else ifeq ($(BACKEND),wlroots)
         # wayland-scanner).
         PROTO_DIR  = build/$(BACKEND)/protocol
         PROTO_HDRS = $(PROTO_DIR)/wlr-layer-shell-unstable-v1-protocol.h \
-                     $(PROTO_DIR)/wlr-output-power-management-unstable-v1-protocol.h
+                     $(PROTO_DIR)/wlr-output-power-management-unstable-v1-protocol.h \
+                     $(PROTO_DIR)/ext-workspace-v1-protocol.h
+        WAYLAND_PROTOCOLS_DIR ?= $(shell pkg-config --variable=pkgdatadir wayland-protocols 2>/dev/null || echo /usr/share/wayland-protocols)
         CFLAGS += -I$(PROTO_DIR)
         WLR_PROTOCOLS_DIR ?= $(shell pkg-config --variable=pkgdatadir wlr-protocols 2>/dev/null || echo /usr/share/wlr-protocols)
     endif
@@ -88,6 +90,10 @@ debug: CFLAGS += -O0 -g
 debug: $(WM_BIN) bspc
 
 $(PROTO_DIR)/%-protocol.h: $(WLR_PROTOCOLS_DIR)/unstable/%.xml
+	@mkdir -p $(PROTO_DIR)
+	wayland-scanner server-header $< $@
+
+$(PROTO_DIR)/ext-workspace-v1-protocol.h: $(WAYLAND_PROTOCOLS_DIR)/staging/ext-workspace/ext-workspace-v1.xml
 	@mkdir -p $(PROTO_DIR)
 	wayland-scanner server-header $< $@
 

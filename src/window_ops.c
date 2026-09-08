@@ -162,9 +162,9 @@ void ewmh_update_active_window(void)
 	backend_ewmh_update_active_window(win);
 }
 
-void ewmh_update_number_of_desktops(void) {}
-void ewmh_update_current_desktop(void) {}
-void ewmh_update_desktop_names(void) {}
+void ewmh_update_number_of_desktops(void) { backend_workspaces_update(); }
+void ewmh_update_current_desktop(void) { backend_workspaces_update(); }
+void ewmh_update_desktop_names(void) { backend_workspaces_update(); }
 void ewmh_update_desktop_viewport(void) {}
 void ewmh_set_wm_desktop(node_t *n, desktop_t *d) { (void)n; (void)d; }
 void ewmh_update_wm_desktops(void) {}
