@@ -572,9 +572,15 @@ static void output_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&output->link);
 	free(output);
 
-	/* Notify bspwm core of output change */
-	update_monitors();
-	output_manager_update();
+	/* Notify bspwm core of output change — but not during shutdown. On
+	 * teardown, cleanup() has already freed every monitor before
+	 * backend_destroy() tears the outputs down; rebuilding the monitor tree
+	 * here would recreate a monitor+desktop that nothing then frees (a leak)
+	 * and would touch already-destroyed compositor state. */
+	if (running) {
+		update_monitors();
+		output_manager_update();
+	}
 }
 
 static void server_new_output(struct wl_listener *listener, void *data)
@@ -615,8 +621,22 @@ static void server_new_output(struct wl_listener *listener, void *data)
 		wlr_scene_output_create(server.scene, wlr_output);
 	wlr_scene_output_layout_add_output(server.scene_layout, l_output, scene_output);
 
-	/* Notify bspwm core */
-	update_monitors();
+	/* Notify bspwm core of the new output — but not during initial startup.
+	 * The outputs are created while wlr_backend_start() runs inside
+	 * backend_init(), before setup()/init() have run. Building the monitor
+	 * tree here would allocate a monitor+desktop that init() then drops on
+	 * the floor (it nulls mon_head without freeing) before setup() rebuilds
+	 * the tree — a per-output startup leak. setup() calls update_monitors()
+	 * itself once the core is ready; only later hotplug events need this.
+	 *
+	 * output_manager_update() only publishes server.outputs to the wlr
+	 * output-management protocol (it never touches mon_head), and it is the
+	 * only startup path that seeds the manager's heads — skipping it here
+	 * would leave wlr-randr and other output-management clients seeing no
+	 * outputs until the first hotplug. So run it unconditionally. */
+	if (running) {
+		update_monitors();
+	}
 	output_manager_update();
 }
 
