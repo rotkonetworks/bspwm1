@@ -1,3 +1,34 @@
+# v1.6.1
+
+Fixes found by running bspwm-wl as a real session on bare DRM hardware, plus
+control-socket robustness.
+
+### Fixed
+
+- **wlroots: no VT switching.** The compositor ignored Ctrl+Alt+F1..F12, so a
+  real session had no way out to another VT — a trap on bare metal. It now
+  captures the `wlr_session` and calls `wlr_session_change_vt` on an
+  `XF86Switch_VT_n` keysym, handled before the lock check so you can always
+  escape. No-op when nested, where the host switches VTs.
+- **wlroots: border rectangles lingered after a window closed.** The toplevel
+  was freed without destroying its container scene tree, leaking the border
+  rects into the scene graph. The tree is now destroyed before the free.
+- **A restart could strand IPC on an unreachable socket.** The restart guard
+  reused the inherited listening fd whenever *a* socket sat at the path, but a
+  stale or shadowing socket passes that check while `connect()` reaches
+  nothing — clients then fail silently and keybinds die. The WM now always
+  rebinds a fresh socket on restart; a bspc exchange is a one-shot and
+  subscribers drop across a re-exec regardless, so the rebind costs nothing
+  observable and guarantees the path names the live socket.
+- **`bspc` now falls back to the legacy `/tmp` socket** when the primary
+  `$XDG_RUNTIME_DIR` path has no listener, bridging an upgrade where a
+  not-yet-restarted WM is still bound under `/tmp`. On failure it reports the
+  paths it tried instead of a bare "Failed to connect".
+
+### New
+
+- `bspc -v` / `bspc --version` prints the version, matching `bspwm -v`.
+
 # v1.6.0
 
 The Wayland compositor build is now real. `bspwm-wl` had never been run
