@@ -1,3 +1,20 @@
+# v1.6.3
+
+### Fixed
+
+- **A fullscreen window moved to another desktop could not be left with
+  the keyboard.** `bspc node -d ^N` on a fullscreen node (super+shift+N in
+  the example config) left it fullscreen on the destination while that
+  desktop's focus stayed on whatever was focused there before. Every key
+  then went to a window hidden underneath, and `bspc node -t ~fullscreen`
+  toggled the wrong one, so a game or mpv sat on top with no way out. A
+  fullscreen node now becomes the destination desktop's focus on arrival.
+  Upstream bspwm behaves the old way; this is a deliberate departure.
+- **`bspc node -d ^N --follow` lost focus on the moved node.** The fork
+  validated the remembered focus between unlink and insert, when the subtree
+  belongs to no desktop, so the lookup always failed and the destination fell
+  back to its previous focus. Validation now runs after insertion.
+
 # v1.6.2
 
 Bug-fix release for the wlroots compositor, from multi-window use and a

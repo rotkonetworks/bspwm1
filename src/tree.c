@@ -2164,15 +2164,18 @@ bool transfer_node(monitor_t *ms, desktop_t *ds, node_t *ns, monitor_t *md, desk
 	}
 
 	unlink_node(ms, ds, ns);
+	insert_node(md, dd, ns, nd);
 
+	/* Validate the remembered focus only once the subtree is back in a
+	 * tree. Between unlink and insert it belongs to no desktop, so a lookup
+	 * there always failed and every `--follow` transfer of the focused node
+	 * lost its focus on arrival. */
 	if (last_ds_focus && last_focus_id != 0) {
 		coordinates_t loc;
 		if (!find_by_id(last_focus_id, &loc) || loc.node != last_ds_focus) {
 			last_ds_focus = NULL;
 		}
 	}
-
-	insert_node(md, dd, ns, nd);
 
 	if (md != ms) {
 		if (!ns->client || monitor_from_client(ns->client) != md) {
@@ -2234,7 +2237,12 @@ bool transfer_node(monitor_t *ms, desktop_t *ds, node_t *ns, monitor_t *md, desk
 			}
 		}
 		if (!held_focus || !follow || !ds_was_focused) {
-			if (dd->focus == ns) {
+			/* A fullscreen window covers its whole desktop. If it lands on a
+			 * desktop whose focus is some other node, every key press goes to
+			 * a window nobody can see and the fullscreen one cannot be left
+			 * with the keyboard. Make it the destination's focus instead. */
+			bool covers_desktop = ns->client && IS_FULLSCREEN(ns->client);
+			if (dd->focus == ns || covers_desktop) {
 				if (mon != NULL && dd == mon->desk) {
 					focus_node(md, dd, held_focus ? last_ds_focus : ns);
 				} else {
