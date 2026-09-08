@@ -8,6 +8,11 @@
 set -e
 
 BACKEND="${1:-x11}"
+# The WM exports BSPWM_SOCKET to everything it spawns, so a terminal inside
+# a live session carries the live socket path. Left in place, the WM under
+# test binds that same path and unlinks it on exit, cutting bspc off from
+# the real session.
+unset BSPWM_SOCKET
 # The X11 build is bspwm, the wlroots compositor is bspwm-wl.
 BSPWM="../bspwm"
 [ "$BACKEND" = "wlroots" ] && BSPWM="../bspwm-wl"

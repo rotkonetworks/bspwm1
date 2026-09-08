@@ -47,6 +47,14 @@ found by running it nested inside an X session with a full desktop config.
 - `tests/run_headless`: the wlroots run picks the right binary, exports
   `WAYLAND_DISPLAY` for its clients, no longer trips on an undefined
   variable in the focus test, and prints colours under plain `sh`.
+- `max_tiles_per_desktop` accepted at most 8, which was also its default.
+  The bound is now 64. A desktop with the limit enabled but the value left
+  at 0 (what a rejected config command leaves behind) no longer floats every
+  new window; 0 means unconfigured.
+- `tests/run_headless` unsets `BSPWM_SOCKET`. Now that the WM exports it to
+  every child, a `make test` run from a terminal inside a live session bound
+  the live socket path on the test display and unlinked it on exit, cutting
+  bspc off from the real window manager.
 
 # v1.5.0
 

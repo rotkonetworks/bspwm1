@@ -71,6 +71,9 @@
 
 #define TILE_LIMIT_ENABLED          false
 #define MAX_TILES_PER_DESKTOP       8
+/* Upper bound accepted by `bspc config max_tiles_per_desktop`. The
+ * default above is deliberately smaller than the bound. */
+#define MAX_TILES_PER_DESKTOP_LIMIT 64
 
 /* Windows-like snap behavior */
 #define EDGE_SNAP_ENABLED           true

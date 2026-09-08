@@ -452,7 +452,10 @@ node_t *insert_node(monitor_t *m, desktop_t *d, node_t *n, node_t *f)
 	}
 
 	int current_tiles = count_tiled_windows(d);
-	if (current_tiles >= d->max_tiles_per_desktop) {
+	/* A limit of 0 is "not configured", not "no tiles": a rejected config
+	 * command leaves the desktop enabled with 0, which used to float every
+	 * new window. */
+	if (d->max_tiles_per_desktop > 0 && current_tiles >= d->max_tiles_per_desktop) {
 		/* Force the window floating once the desktop is full, so it stays
 		 * managed rather than being dropped. The node isn't in the tree yet,
 		 * so set_state() can't run here; mirror what it would have left

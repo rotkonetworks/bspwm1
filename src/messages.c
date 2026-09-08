@@ -1924,8 +1924,8 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 		}
 	} else if (streq("max_tiles_per_desktop", name)) {
 		int limit;
-		if (sscanf(value, "%i", &limit) != 1 || limit < 1 || limit > MAX_TILES_PER_DESKTOP) {
-			fail(rsp, "config: %s: Invalid value: '%s' (must be 1-%d).\n", name, value, MAX_TILES_PER_DESKTOP);
+		if (sscanf(value, "%i", &limit) != 1 || limit < 1 || limit > MAX_TILES_PER_DESKTOP_LIMIT) {
+			fail(rsp, "config: %s: Invalid value: '%s' (must be 1-%d).\n", name, value, MAX_TILES_PER_DESKTOP_LIMIT);
 			return;
 		}
 
