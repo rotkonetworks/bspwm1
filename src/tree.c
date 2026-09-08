@@ -1326,12 +1326,20 @@ bool is_child(node_t *a, node_t *b)
  * Returns the number of nodes reaped. */
 unsigned int prune_dead_nodes(void)
 {
-	if (clients_count == 0) {
+	/* Count from the trees: a restored state whose recorded client count
+	 * was wrong (or zero) must not skip the prune, since on the wlroots
+	 * backend every restored client is dead after a restart. */
+	uint32_t capacity = 0;
+	for (monitor_t *m = mon_head; m != NULL; m = m->next) {
+		for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
+			capacity += clients_count_in(d->root);
+		}
+	}
+	if (capacity == 0) {
 		return 0;
 	}
 
 	/* Collect before removing: unmanage_window mutates the trees we walk. */
-	uint32_t capacity = clients_count;
 	bspwm_wid_t *dead = safe_malloc_array(capacity, sizeof(bspwm_wid_t));
 	if (dead == NULL) {
 		warn("prune_dead_nodes: allocation failed.\n");

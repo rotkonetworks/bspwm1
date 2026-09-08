@@ -78,6 +78,7 @@
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_output_management_v1.h>
 #include <wlr/types/wlr_ext_workspace_v1.h>
+#include <wlr/types/wlr_session_lock_v1.h>
 #include "ext-workspace-v1-protocol.h"
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/edges.h>
@@ -121,6 +122,7 @@ struct bspwm_wlr_toplevel {
 	 * UINT32_MAX before the first move_resize so the first state is always
 	 * pushed. Telling tiled clients they are tiled stops the cell-rounding. */
 	uint32_t tiled_edges;
+	bool fullscreen_sent;
 
 	struct wl_listener map;
 	struct wl_listener unmap;
@@ -173,6 +175,9 @@ struct bspwm_wlr_ws {
 struct bspwm_wlr_output {
 	bspwm_output_id_t id;
 	struct wlr_output *wlr_output;
+	/* Exclusive-zone padding last applied to the monitor, so the user's
+	 * own top_padding etc. can be preserved by applying only the delta. */
+	int strut_top, strut_right, strut_bottom, strut_left;
 	struct wl_listener frame;
 	struct wl_listener request_state;
 	struct wl_listener destroy;
@@ -198,6 +203,14 @@ struct bspwm_wlr_xwayland_surface {
 	struct wl_listener dissociate;
 	struct wl_listener destroy;
 	struct wl_listener request_configure;
+	/* The subsurface tree destroys itself with the wl_surface (X unmap,
+	 * client exit); this watches it so the pointer never dangles. */
+	struct wl_listener scene_destroy;
+	/* Geometry the core last applied; re-asserted when the client asks
+	 * for something else while managed. */
+	int16_t x, y;
+	uint16_t width, height;
+	bool managed_geometry;
 
 	struct wl_list link; /* xwayland_surfaces list */
 };
@@ -291,6 +304,8 @@ static struct {
 	/* Idle inhibit (prevent screensaver during video) */
 	struct wlr_idle_inhibit_manager_v1 *idle_inhibit_mgr;
 	struct wlr_idle_notifier_v1 *idle_notifier;
+	struct wl_listener new_idle_inhibitor;
+	int idle_inhibitors;
 
 	/* XDG activation (urgency / focus requests) */
 	struct wlr_xdg_activation_v1 *xdg_activation;
@@ -312,6 +327,21 @@ static struct {
 	/* Session lock */
 	struct wlr_session_lock_manager_v1 *session_lock_mgr;
 	struct wlr_session_lock_v1 *active_lock;
+	struct wl_listener lock_new_surface;
+	struct wl_listener lock_unlock;
+	/* Lock surfaces and the blanking rect live here, above every layer. */
+	struct wlr_scene_tree *lock_tree;
+	struct wlr_scene_rect *lock_blank;
+	/* DISPLAY as inherited at startup. It is overwritten with Xwayland's
+	 * display for children; a restart re-execs with this environment, and
+	 * a nested run's X11 backend needs the original back. */
+	char *inherited_display;
+	/* Drag and drop */
+	struct wl_listener request_start_drag;
+	struct wl_listener start_drag;
+	struct wl_listener drag_destroy;
+	struct wlr_scene_tree *drag_icon;
+	int pointer_count;
 	struct wl_listener new_lock;
 	struct wl_listener lock_destroy;
 	bool locked;
@@ -436,6 +466,15 @@ static void toplevel_apply_tiled(struct bspwm_wlr_toplevel *tl)
 		tl->tiled_edges = edges;
 		wlr_xdg_toplevel_set_tiled(tl->xdg_toplevel, edges);
 	}
+
+	/* The client must be told it is fullscreen, or browsers keep their
+	 * chrome and video players their controls; and told when it no longer
+	 * is, or it can never leave. */
+	bool fs = loc.node && loc.node->client && loc.node->client->state == STATE_FULLSCREEN;
+	if (fs != tl->fullscreen_sent) {
+		tl->fullscreen_sent = fs;
+		wlr_xdg_toplevel_set_fullscreen(tl->xdg_toplevel, fs);
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -464,6 +503,15 @@ static struct bspwm_wlr_presel *presel_from_id(bspwm_wid_t id)
 /*  Toplevel lookup by ID                                             */
 /* ------------------------------------------------------------------ */
 
+static struct bspwm_wlr_toplevel *toplevel_from_xdg(struct wlr_xdg_toplevel *xdg)
+{
+	struct bspwm_wlr_toplevel *tl;
+	wl_list_for_each(tl, &server.toplevels, link) {
+		if (tl->xdg_toplevel == xdg) return tl;
+	}
+	return NULL;
+}
+
 static struct bspwm_wlr_toplevel *toplevel_from_id(bspwm_wid_t id)
 {
 	struct bspwm_wlr_toplevel *tl;
@@ -481,6 +529,11 @@ static struct bspwm_wlr_toplevel *toplevel_from_id(bspwm_wid_t id)
 /* Forward decl: output state/mode changes need to re-arrange layers so
  * that exclusive-zone padding tracks the new resolution. */
 static void arrange_layers(struct bspwm_wlr_output *output);
+static bool session_lock_input_ok(struct wlr_surface *surface);
+static void xwayland_scene_destroy(struct wl_listener *listener, void *data);
+static struct wl_list xwayland_surfaces_list;
+static bool xwayland_surfaces_initialized;
+static void close_layer_surfaces_on_output(struct wlr_output *wlr_output);
 static void workspace_commit(struct wl_listener *listener, void *data);
 
 static void output_frame(struct wl_listener *listener, void *data)
@@ -594,9 +647,10 @@ static void output_request_state(struct wl_listener *listener, void *data)
 	struct bspwm_wlr_output *output = wl_container_of(listener, output, request_state);
 	const struct wlr_output_event_request_state *event = data;
 	wlr_output_commit_state(output->wlr_output, event->state);
-	/* Resolution or transform may have changed; recompute exclusive-zone
-	 * padding so tiled windows reflow into the new usable area. Without
-	 * this, hotplugging or rotating leaves stale m->padding values. */
+	/* Resolution or transform may have changed: the core's monitor
+	 * rectangle must follow (nested window resize, backend mode change),
+	 * then exclusive-zone padding is recomputed for the new area. */
+	update_monitors();
 	arrange_layers(output);
 	output_manager_update();
 }
@@ -605,6 +659,11 @@ static void output_destroy(struct wl_listener *listener, void *data)
 {
 	struct bspwm_wlr_output *output = wl_container_of(listener, output, destroy);
 	(void)data;
+
+	/* wlroots does not close layer surfaces with their output; left alone
+	 * they keep a dangling output pointer and render at stale coordinates
+	 * on whatever monitor moves into that space. */
+	close_layer_surfaces_on_output(output->wlr_output);
 
 	wl_list_remove(&output->frame.link);
 	wl_list_remove(&output->request_state.link);
@@ -653,7 +712,9 @@ static void server_new_output(struct wl_listener *listener, void *data)
 	output->destroy.notify = output_destroy;
 	wl_signal_add(&wlr_output->events.destroy, &output->destroy);
 
-	wl_list_insert(&server.outputs, &output->link);
+	/* Append: backend_query_outputs marks the first entry primary, and
+	 * prepending made every hotplugged monitor steal that role. */
+	wl_list_insert(server.outputs.prev, &output->link);
 
 	struct wlr_output_layout_output *l_output =
 		wlr_output_layout_add_auto(server.output_layout, wlr_output);
@@ -776,6 +837,11 @@ static void xdg_toplevel_unmap(struct wl_listener *listener, void *data)
 	struct bspwm_wlr_toplevel *tl = wl_container_of(listener, tl, unmap);
 	(void)data;
 
+	if (server.grabbed_tl == tl) {
+		server.grabbed_tl = NULL;
+		server.cursor_mode = BSPWM_CURSOR_PASSTHROUGH;
+	}
+
 	if (tl->foreign_handle) {
 		wl_list_remove(&tl->foreign_request_activate.link);
 		wl_list_remove(&tl->foreign_request_close.link);
@@ -824,6 +890,13 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&tl->request_fullscreen.link);
 	wl_list_remove(&tl->set_title.link);
 	wl_list_remove(&tl->set_app_id.link);
+	if (server.grabbed_tl == tl) {
+		server.grabbed_tl = NULL;
+		server.cursor_mode = BSPWM_CURSOR_PASSTHROUGH;
+	}
+	/* The xdg_surface outlives its toplevel role; a popup created against
+	 * it afterwards must not find the freed scene tree. */
+	tl->xdg_toplevel->base->data = NULL;
 	if (tl->decoration) {
 		wl_list_remove(&tl->decoration_destroy.link);
 		tl->decoration = NULL;
@@ -853,7 +926,10 @@ static void xdg_toplevel_request_maximize(struct wl_listener *listener, void *da
 {
 	struct bspwm_wlr_toplevel *tl = wl_container_of(listener, tl, request_maximize);
 	(void)data;
-	/* Deny maximize — bspwm uses its own state management */
+	/* Deny maximize — bspwm uses its own state management. Before the
+	 * initial commit a configure cannot be scheduled (wlroots asserts);
+	 * the reply goes out with the initial configure instead. */
+	if (!tl->xdg_toplevel->base->initialized) return;
 	wlr_xdg_toplevel_set_maximized(tl->xdg_toplevel, false);
 }
 
@@ -862,11 +938,28 @@ static void xdg_toplevel_request_fullscreen(struct wl_listener *listener, void *
 	struct bspwm_wlr_toplevel *tl = wl_container_of(listener, tl, request_fullscreen);
 	(void)data;
 
-	/* Let bspwm core handle fullscreen via its state machine */
+	/* Fires for both set_fullscreen and unset_fullscreen; the direction is
+	 * in requested.fullscreen. Let the core's state machine apply it. */
+	bool want = tl->xdg_toplevel->requested.fullscreen;
 	coordinates_t loc;
-	if (locate_window(tl->id, &loc) && loc.monitor && loc.desktop && loc.node) {
-		set_state(loc.monitor, loc.desktop, loc.node, STATE_FULLSCREEN);
+	if (locate_window(tl->id, &loc) && loc.monitor && loc.desktop && loc.node && loc.node->client) {
+		client_state_t target = want ? STATE_FULLSCREEN : loc.node->client->last_state;
+		if (!want && target == STATE_FULLSCREEN) target = STATE_TILED;
+		set_state(loc.monitor, loc.desktop, loc.node, target);
+		arrange(loc.monitor, loc.desktop);
 	}
+	/* xdg-shell requires a configure in reply even when nothing changes
+	 * (e.g. the request arrived before the window is managed; the rule
+	 * pass picks requested.fullscreen up at manage time). */
+	if (tl->xdg_toplevel->base->initialized) {
+		wlr_xdg_surface_schedule_configure(tl->xdg_toplevel->base);
+	}
+}
+
+bool backend_window_requests_fullscreen(bspwm_wid_t win)
+{
+	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
+	return tl && tl->xdg_toplevel->requested.fullscreen;
 }
 
 static void server_new_xdg_toplevel(struct wl_listener *listener, void *data)
@@ -942,12 +1035,38 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data)
 	(void)listener;
 	struct wlr_xdg_popup *popup = data;
 
+	struct wlr_scene_tree *parent_tree = NULL;
 	struct wlr_xdg_surface *parent =
 		wlr_xdg_surface_try_from_wlr_surface(popup->parent);
-	if (!parent) return;
-
-	struct wlr_scene_tree *parent_tree = parent->data;
+	if (parent) {
+		parent_tree = parent->data;
+	} else {
+		/* waybar menus/tooltips and launcher popups have a layer surface
+		 * as parent; they never mapped because this returned early. */
+		struct wlr_layer_surface_v1 *lparent =
+			wlr_layer_surface_v1_try_from_wlr_surface(popup->parent);
+		if (lparent && lparent->data) {
+			struct bspwm_wlr_layer_surface *ls = lparent->data;
+			parent_tree = ls->scene->tree;
+		}
+	}
+	if (!parent_tree) return;
 	popup->base->data = wlr_scene_xdg_surface_create(parent_tree, popup->base);
+
+	/* Let the positioner's flip/slide rules keep the popup on screen:
+	 * give it the output box in the parent surface's coordinate space. */
+	{
+		int lx, ly;
+		wlr_scene_node_coords(&parent_tree->node, &lx, &ly);
+		struct wlr_output *out = wlr_output_layout_output_at(server.output_layout, lx, ly);
+		if (out) {
+			struct wlr_box obox;
+			wlr_output_layout_get_box(server.output_layout, out, &obox);
+			struct wlr_box box = { .x = obox.x - lx, .y = obox.y - ly,
+			                       .width = obox.width, .height = obox.height };
+			wlr_xdg_popup_unconstrain_from_box(popup, &box);
+		}
+	}
 
 	struct bspwm_wlr_popup *p = calloc(1, sizeof(*p));
 	if (!p) return;
@@ -962,8 +1081,45 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data)
 /*  Keyboard handling                                                 */
 /* ------------------------------------------------------------------ */
 
+/* Without activity notifications swayidle's timers run from creation
+ * regardless of input: the screen locks and outputs power off while the
+ * user is typing. Inhibitors (mpv, browsers playing video) hold idle off. */
+static void idle_activity(void)
+{
+	if (server.idle_notifier) {
+		wlr_idle_notifier_v1_notify_activity(server.idle_notifier, server.seat);
+	}
+}
+
+struct bspwm_wlr_idle_inhibitor {
+	struct wl_listener destroy;
+};
+
+static void idle_inhibitor_destroy(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_idle_inhibitor *ih = wl_container_of(listener, ih, destroy);
+	(void)data;
+	wl_list_remove(&ih->destroy.link);
+	free(ih);
+	if (server.idle_inhibitors > 0) server.idle_inhibitors--;
+	wlr_idle_notifier_v1_set_inhibited(server.idle_notifier, server.idle_inhibitors > 0);
+}
+
+static void new_idle_inhibitor(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	struct wlr_idle_inhibitor_v1 *inhibitor = data;
+	struct bspwm_wlr_idle_inhibitor *ih = calloc(1, sizeof(*ih));
+	if (!ih) return;
+	ih->destroy.notify = idle_inhibitor_destroy;
+	wl_signal_add(&inhibitor->events.destroy, &ih->destroy);
+	server.idle_inhibitors++;
+	wlr_idle_notifier_v1_set_inhibited(server.idle_notifier, true);
+}
+
 static void keyboard_key(struct wl_listener *listener, void *data)
 {
+	idle_activity();
 	struct bspwm_wlr_keyboard *kb = wl_container_of(listener, kb, key);
 	struct wlr_keyboard_key_event *event = data;
 
@@ -989,8 +1145,10 @@ static void keyboard_key(struct wl_listener *listener, void *data)
 
 	/* When locked, forward all keys to the lock surface only */
 	if (server.locked) {
-		wlr_seat_keyboard_notify_key(server.seat,
-			event->time_msec, event->keycode, event->state);
+		if (session_lock_input_ok(server.seat->keyboard_state.focused_surface)) {
+			wlr_seat_keyboard_notify_key(server.seat,
+				event->time_msec, event->keycode, event->state);
+		}
 		return;
 	}
 
@@ -1059,6 +1217,14 @@ static void keyboard_modifiers(struct wl_listener *listener, void *data)
 		&kb->wlr_keyboard->modifiers);
 }
 
+static void update_seat_capabilities(void)
+{
+	uint32_t caps = 0;
+	if (!wl_list_empty(&server.keyboards)) caps |= WL_SEAT_CAPABILITY_KEYBOARD;
+	if (server.pointer_count > 0) caps |= WL_SEAT_CAPABILITY_POINTER;
+	wlr_seat_set_capabilities(server.seat, caps);
+}
+
 static void keyboard_destroy(struct wl_listener *listener, void *data)
 {
 	struct bspwm_wlr_keyboard *kb = wl_container_of(listener, kb, destroy);
@@ -1068,6 +1234,21 @@ static void keyboard_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&kb->destroy.link);
 	wl_list_remove(&kb->link);
 	free(kb);
+	update_seat_capabilities();
+}
+
+struct bspwm_wlr_pointer {
+	struct wl_listener destroy;
+};
+
+static void pointer_destroy(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_pointer *p = wl_container_of(listener, p, destroy);
+	(void)data;
+	wl_list_remove(&p->destroy.link);
+	free(p);
+	if (server.pointer_count > 0) server.pointer_count--;
+	update_seat_capabilities();
 }
 
 static void server_new_keyboard(struct wlr_input_device *device)
@@ -1103,6 +1284,10 @@ static void server_new_keyboard(struct wlr_input_device *device)
 /* ------------------------------------------------------------------ */
 
 static struct bspwm_wlr_toplevel *toplevel_at_cursor(double *sx, double *sy);
+static bspwm_wid_t window_id_from_node(struct wlr_scene_node *node);
+static struct bspwm_wlr_xwayland_surface *xsurface_from_id(bspwm_wid_t id);
+static bspwm_wid_t window_at_cursor(double *sx, double *sy);
+static bspwm_wid_t last_hover_id = BSPWM_WID_NONE;
 
 static void process_cursor_motion(uint32_t time)
 {
@@ -1130,6 +1315,9 @@ static void process_cursor_motion(uint32_t time)
 		if (new_h < 32) new_h = 32;
 
 		wlr_xdg_toplevel_set_size(server.grabbed_tl->xdg_toplevel, new_w, new_h);
+		server.grabbed_tl->req_width = new_w;
+		server.grabbed_tl->req_height = new_h;
+		toplevel_update_borders(server.grabbed_tl);
 
 		/* Update bspwm's floating rectangle */
 		coordinates_t loc;
@@ -1138,6 +1326,11 @@ static void process_cursor_motion(uint32_t time)
 			loc.node->client->floating_rectangle.height = new_h;
 		}
 		return;
+	}
+
+	if (server.drag_icon) {
+		wlr_scene_node_set_position(&server.drag_icon->node,
+			(int)server.cursor->x, (int)server.cursor->y);
 	}
 
 	double sx, sy;
@@ -1156,36 +1349,56 @@ static void process_cursor_motion(uint32_t time)
 		}
 	}
 
-	if (!surface) {
+	if (!surface || !session_lock_input_ok(surface)) {
 		wlr_cursor_set_xcursor(server.cursor, server.cursor_mgr, "default");
 		wlr_seat_pointer_clear_focus(seat);
-		return;
+		if (server.locked) return;
+	} else {
+		wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
+		wlr_seat_pointer_notify_motion(seat, time, sx, sy);
 	}
+	if (server.locked) return;
 
-	wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
-	wlr_seat_pointer_notify_motion(seat, time, sx, sy);
-
-	/* Focus-follows-pointer: refocus only when the toplevel under the
-	 * cursor changes, so we don't thrash focus on every motion event. */
+	/* Focus-follows-pointer, with the X11 backend's semantics: refocus when
+	 * the window under the cursor is not the globally focused one (so the
+	 * focused monitor follows the pointer too), and focus the monitor under
+	 * the pointer when it is over empty space. Pointer-follows-focus must
+	 * not fire back during a pointer-driven change. */
 	if (focus_follows_pointer) {
 		double tsx, tsy;
-		struct bspwm_wlr_toplevel *tl = toplevel_at_cursor(&tsx, &tsy);
-		static bspwm_wid_t last_hover_id;
-		if (tl && tl->id != last_hover_id) {
-			last_hover_id = tl->id;
+		bspwm_wid_t id = window_at_cursor(&tsx, &tsy);
+		if (id != BSPWM_WID_NONE && id != last_hover_id) {
+			last_hover_id = id;
 			coordinates_t loc;
-			if (locate_window(tl->id, &loc) && loc.monitor && loc.desktop &&
-			    loc.node != loc.desktop->focus) {
+			if (locate_window(id, &loc) && loc.monitor && loc.desktop &&
+			    loc.desktop == loc.monitor->desk && mon && mon->desk &&
+			    loc.node != mon->desk->focus) {
+				bool pff = pointer_follows_focus, pfm = pointer_follows_monitor;
+				pointer_follows_focus = false;
+				pointer_follows_monitor = false;
 				focus_node(loc.monitor, loc.desktop, loc.node);
+				pointer_follows_focus = pff;
+				pointer_follows_monitor = pfm;
 			}
-		} else if (!tl) {
+		} else if (id == BSPWM_WID_NONE) {
 			last_hover_id = BSPWM_WID_NONE;
+			bspwm_point_t pt = { (int16_t)server.cursor->x, (int16_t)server.cursor->y };
+			monitor_t *m = monitor_from_point(pt);
+			if (m && m != mon) {
+				bool pff = pointer_follows_focus, pfm = pointer_follows_monitor;
+				pointer_follows_focus = false;
+				pointer_follows_monitor = false;
+				focus_node(m, m->desk, m->desk ? m->desk->focus : NULL);
+				pointer_follows_focus = pff;
+				pointer_follows_monitor = pfm;
+			}
 		}
 	}
 }
 
 static void cursor_motion(struct wl_listener *listener, void *data)
 {
+	idle_activity();
 	(void)listener;
 	struct wlr_pointer_motion_event *event = data;
 	wlr_cursor_move(server.cursor, &event->pointer->base, event->delta_x, event->delta_y);
@@ -1194,10 +1407,40 @@ static void cursor_motion(struct wl_listener *listener, void *data)
 
 static void cursor_motion_absolute(struct wl_listener *listener, void *data)
 {
+	idle_activity();
 	(void)listener;
 	struct wlr_pointer_motion_absolute_event *event = data;
 	wlr_cursor_warp_absolute(server.cursor, &event->pointer->base, event->x, event->y);
 	process_cursor_motion(event->time_msec);
+}
+
+/* Resolve a scene node's data pointer to a managed window id, for xdg and
+ * xwayland windows alike, without trusting the pointer type. */
+static bspwm_wid_t window_id_from_node(struct wlr_scene_node *node)
+{
+	while (node) {
+		if (node->data) {
+			struct bspwm_wlr_toplevel *check;
+			wl_list_for_each(check, &server.toplevels, link) {
+				if ((void *)check == node->data) return check->id;
+			}
+			if (xwayland_surfaces_initialized) {
+				struct bspwm_wlr_xwayland_surface *xs;
+				wl_list_for_each(xs, &xwayland_surfaces_list, link) {
+					if ((void *)xs == node->data) return xs->id;
+				}
+			}
+		}
+		node = node->parent ? &node->parent->node : NULL;
+	}
+	return BSPWM_WID_NONE;
+}
+
+static bspwm_wid_t window_at_cursor(double *sx, double *sy)
+{
+	struct wlr_scene_node *node = wlr_scene_node_at(
+		&server.scene->tree.node, server.cursor->x, server.cursor->y, sx, sy);
+	return window_id_from_node(node);
 }
 
 /* Find the toplevel at cursor position */
@@ -1244,6 +1487,7 @@ static void begin_interactive_resize(struct bspwm_wlr_toplevel *tl)
 
 static void cursor_button(struct wl_listener *listener, void *data)
 {
+	idle_activity();
 	(void)listener;
 	struct wlr_pointer_button_event *event = data;
 
@@ -1262,12 +1506,31 @@ static void cursor_button(struct wl_listener *listener, void *data)
 	uint32_t modifiers = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
 	bool super_held = (modifiers & WLR_MODIFIER_LOGO);
 
+	if (server.locked) {
+		/* Only the lock surface may see clicks; it already has pointer
+		 * focus if the cursor is over it. */
+		if (session_lock_input_ok(server.seat->pointer_state.focused_surface)) {
+			wlr_seat_pointer_notify_button(server.seat,
+				event->time_msec, event->button, event->state);
+		}
+		return;
+	}
+
 	if (super_held && event->state == WL_POINTER_BUTTON_STATE_PRESSED) {
 		double sx, sy;
 		struct bspwm_wlr_toplevel *tl = toplevel_at_cursor(&sx, &sy);
 		if (tl) {
-			/* Focus the window */
-			backend_set_input_focus(tl->id);
+			/* Focus through the core so bspc, borders and history agree
+			 * with where the keyboard went. */
+			coordinates_t floc;
+			if (locate_window(tl->id, &floc) && floc.monitor && floc.desktop) {
+				bool pff = pointer_follows_focus, pfm = pointer_follows_monitor;
+				pointer_follows_focus = false;
+				pointer_follows_monitor = false;
+				focus_node(floc.monitor, floc.desktop, floc.node);
+				pointer_follows_focus = pff;
+				pointer_follows_monitor = pfm;
+			}
 
 			/* Check which button for move vs resize */
 			if (event->button == BTN_LEFT) {
@@ -1288,16 +1551,22 @@ static void cursor_button(struct wl_listener *listener, void *data)
 		}
 	}
 
-	/* Normal click — focus + pass through */
-	double sx, sy;
-	struct bspwm_wlr_toplevel *tl = toplevel_at_cursor(&sx, &sy);
-	if (tl) {
-		backend_set_input_focus(tl->id);
-
-		/* Notify bspwm core of focus change */
+	/* Normal click — focus + pass through. Re-evaluate what is under the
+	 * cursor first: after a keyboard desktop switch the seat's pointer
+	 * focus may still be a now-hidden surface. */
+	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED) {
+		process_cursor_motion(event->time_msec);
+		double sx, sy;
+		bspwm_wid_t id = window_at_cursor(&sx, &sy);
 		coordinates_t loc;
-		if (locate_window(tl->id, &loc) && loc.monitor && loc.desktop) {
+		if (id != BSPWM_WID_NONE && locate_window(id, &loc) && loc.monitor && loc.desktop &&
+		    !(mon && mon->desk && loc.node == mon->desk->focus)) {
+			bool pff = pointer_follows_focus, pfm = pointer_follows_monitor;
+			pointer_follows_focus = false;
+			pointer_follows_monitor = false;
 			focus_node(loc.monitor, loc.desktop, loc.node);
+			pointer_follows_focus = pff;
+			pointer_follows_monitor = pfm;
 		}
 	}
 
@@ -1307,6 +1576,7 @@ static void cursor_button(struct wl_listener *listener, void *data)
 
 static void cursor_axis(struct wl_listener *listener, void *data)
 {
+	idle_activity();
 	(void)listener;
 	struct wlr_pointer_axis_event *event = data;
 	wlr_seat_pointer_notify_axis(server.seat,
@@ -1322,6 +1592,12 @@ static void cursor_frame(struct wl_listener *listener, void *data)
 
 static void server_new_pointer(struct wlr_input_device *device)
 {
+	struct bspwm_wlr_pointer *p = calloc(1, sizeof(*p));
+	if (p) {
+		p->destroy.notify = pointer_destroy;
+		wl_signal_add(&device->events.destroy, &p->destroy);
+		server.pointer_count++;
+	}
 	wlr_cursor_attach_input_device(server.cursor, device);
 }
 
@@ -1341,11 +1617,7 @@ static void server_new_input(struct wl_listener *listener, void *data)
 		break;
 	}
 
-	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
-	if (!wl_list_empty(&server.keyboards)) {
-		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
-	}
-	wlr_seat_set_capabilities(server.seat, caps);
+	update_seat_capabilities();
 }
 
 static void seat_request_cursor(struct wl_listener *listener, void *data)
@@ -1461,13 +1733,27 @@ static void new_decoration(struct wl_listener *listener, void *data)
 static struct wl_list layer_surfaces;  /* bspwm_wlr_layer_surface.link */
 static bool layer_surfaces_initialized = false;
 
+static void close_layer_surfaces_on_output(struct wlr_output *wlr_output)
+{
+	if (!layer_surfaces_initialized) return;
+	struct bspwm_wlr_layer_surface *ls, *tmp;
+	wl_list_for_each_safe(ls, tmp, &layer_surfaces, link) {
+		if (ls->layer_surface->output == wlr_output) {
+			wlr_layer_surface_v1_destroy(ls->layer_surface);
+		}
+	}
+}
+
 static void arrange_layers(struct bspwm_wlr_output *output)
 {
 	if (!layer_surfaces_initialized) return;
 
+	/* Layer trees hang off the scene root, so surfaces must be placed in
+	 * layout coordinates: an output-local (0,0) box put every bar on the
+	 * monitor at the layout origin. */
 	struct wlr_box full_area = {0};
-	wlr_output_effective_resolution(output->wlr_output,
-		&full_area.width, &full_area.height);
+	wlr_output_layout_get_box(server.output_layout, output->wlr_output, &full_area);
+	if (wlr_box_empty(&full_area)) return;
 
 	struct wlr_box usable_area = full_area;
 
@@ -1488,26 +1774,29 @@ static void arrange_layers(struct bspwm_wlr_output *output)
 		}
 	}
 
-	/* Update bspwm monitor padding from exclusive zones.
-	 * This is the Wayland equivalent of EWMH _NET_WM_STRUT_PARTIAL:
-	 * wlr-layer-shell surfaces (waybar, swaybg overlays, etc.) declare
-	 * an exclusive zone, and we shrink the monitor's usable rect so
-	 * tiled windows don't overlap them. */
+	/* Update bspwm monitor padding from exclusive zones: the Wayland
+	 * equivalent of _NET_WM_STRUT_PARTIAL. m->padding is also where the
+	 * user's top_padding etc. live, so apply only the change in struts
+	 * rather than overwriting it. */
 	monitor_t *m = get_monitor_by_output_id(output->id);
 	if (m) {
-		int new_top    = usable_area.y;
-		int new_left   = usable_area.x;
-		int new_right  = full_area.width  - (usable_area.x + usable_area.width);
-		int new_bottom = full_area.height - (usable_area.y + usable_area.height);
-		bool changed = (m->padding.top    != new_top    ||
-		                m->padding.left   != new_left   ||
-		                m->padding.right  != new_right  ||
-		                m->padding.bottom != new_bottom);
-		m->padding.top    = new_top;
-		m->padding.left   = new_left;
-		m->padding.right  = new_right;
-		m->padding.bottom = new_bottom;
+		int new_top    = usable_area.y - full_area.y;
+		int new_left   = usable_area.x - full_area.x;
+		int new_right  = (full_area.x + full_area.width)  - (usable_area.x + usable_area.width);
+		int new_bottom = (full_area.y + full_area.height) - (usable_area.y + usable_area.height);
+		bool changed = (output->strut_top    != new_top    ||
+		                output->strut_left   != new_left   ||
+		                output->strut_right  != new_right  ||
+		                output->strut_bottom != new_bottom);
 		if (changed) {
+			m->padding.top    += new_top    - output->strut_top;
+			m->padding.left   += new_left   - output->strut_left;
+			m->padding.right  += new_right  - output->strut_right;
+			m->padding.bottom += new_bottom - output->strut_bottom;
+			output->strut_top = new_top;
+			output->strut_left = new_left;
+			output->strut_right = new_right;
+			output->strut_bottom = new_bottom;
 			/* Re-tile every desktop on this monitor so windows reflow
 			 * around the freshly-claimed exclusive zone. */
 			for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
@@ -1667,7 +1956,12 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data)
 				break;
 			}
 		}
-		if (!layer_surface->output) return;
+		if (!layer_surface->output) {
+			/* No output to put it on: close it so the client gets
+			 * `closed` instead of a protocol error on its first buffer. */
+			wlr_layer_surface_v1_destroy(layer_surface);
+			return;
+		}
 	}
 
 	/* Pick the right scene tree based on layer */
@@ -1678,6 +1972,7 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data)
 	if (!ls) return;
 
 	ls->layer_surface = layer_surface;
+	layer_surface->data = ls;
 	ls->current_layer = layer_idx;
 	ls->scene = wlr_scene_layer_surface_v1_create(
 		server.layer_trees[layer_idx], layer_surface);
@@ -1741,7 +2036,11 @@ static void xwayland_surface_unmap(struct wl_listener *listener, void *data)
 	(void)data;
 
 	if (!xs->xsurface->override_redirect) {
+		xs->managed_geometry = false;
 		unmanage_window(xs->id);
+	}
+	if (server.seat->pointer_state.focused_surface == xs->xsurface->surface) {
+		wlr_seat_pointer_clear_focus(server.seat);
 	}
 }
 
@@ -1756,6 +2055,8 @@ static void xwayland_surface_associate(struct wl_listener *listener, void *data)
 			server.window_tree, xs->xsurface->surface);
 		if (xs->scene_tree) {
 			xs->scene_tree->node.data = xs;
+			xs->scene_destroy.notify = xwayland_scene_destroy;
+			wl_signal_add(&xs->scene_tree->node.events.destroy, &xs->scene_destroy);
 		}
 	}
 
@@ -1765,6 +2066,14 @@ static void xwayland_surface_associate(struct wl_listener *listener, void *data)
 	wl_signal_add(&xs->xsurface->surface->events.unmap, &xs->unmap);
 }
 
+static void xwayland_scene_destroy(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_xwayland_surface *xs = wl_container_of(listener, xs, scene_destroy);
+	(void)data;
+	wl_list_remove(&xs->scene_destroy.link);
+	xs->scene_tree = NULL;
+}
+
 static void xwayland_surface_dissociate(struct wl_listener *listener, void *data)
 {
 	struct bspwm_wlr_xwayland_surface *xs = wl_container_of(listener, xs, dissociate);
@@ -1772,6 +2081,10 @@ static void xwayland_surface_dissociate(struct wl_listener *listener, void *data
 
 	wl_list_remove(&xs->map.link);
 	wl_list_remove(&xs->unmap.link);
+	/* The wl_surface goes away with the X unmap and a fresh one arrives on
+	 * remap. Its subsurface tree tears itself down with it (already gone
+	 * by the time this fires on client exit), and xwayland_scene_destroy
+	 * clears the pointer, so nothing to free here. */
 }
 
 static void xwayland_surface_destroy(struct wl_listener *listener, void *data)
@@ -1784,6 +2097,10 @@ static void xwayland_surface_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&xs->destroy.link);
 	wl_list_remove(&xs->request_configure.link);
 	wl_list_remove(&xs->link);
+	if (xs->scene_tree) {
+		wlr_scene_node_destroy(&xs->scene_tree->node);
+		xs->scene_tree = NULL;
+	}
 	free(xs);
 }
 
@@ -1792,6 +2109,12 @@ static void xwayland_surface_request_configure(struct wl_listener *listener, voi
 	struct bspwm_wlr_xwayland_surface *xs = wl_container_of(listener, xs, request_configure);
 	struct wlr_xwayland_surface_configure_event *ev = data;
 
+	/* A managed window's geometry is the core's decision; re-assert it.
+	 * Unmanaged and override-redirect windows get what they ask for. */
+	if (xs->managed_geometry) {
+		wlr_xwayland_surface_configure(xs->xsurface, xs->x, xs->y, xs->width, xs->height);
+		return;
+	}
 	wlr_xwayland_surface_configure(xs->xsurface, ev->x, ev->y, ev->width, ev->height);
 }
 
@@ -1864,11 +2187,110 @@ static void xdg_activation_request(struct wl_listener *listener, void *data)
 /*  Session lock                                                      */
 /* ------------------------------------------------------------------ */
 
+struct bspwm_wlr_lock_surface {
+	struct wlr_session_lock_surface_v1 *lock_surface;
+	struct wlr_scene_tree *tree;
+	struct wl_listener map;
+	struct wl_listener destroy;
+};
+
+static void lock_surface_focus(struct wlr_surface *surface)
+{
+	struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server.seat);
+	if (keyboard) {
+		wlr_seat_keyboard_notify_enter(server.seat, surface,
+			keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+	} else {
+		wlr_seat_keyboard_notify_enter(server.seat, surface, NULL, 0, NULL);
+	}
+}
+
+static void lock_surface_map(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_lock_surface *ls = wl_container_of(listener, ls, map);
+	(void)data;
+	lock_surface_focus(ls->lock_surface->surface);
+}
+
+static void lock_surface_destroy(struct wl_listener *listener, void *data)
+{
+	struct bspwm_wlr_lock_surface *ls = wl_container_of(listener, ls, destroy);
+	(void)data;
+	wl_list_remove(&ls->map.link);
+	wl_list_remove(&ls->destroy.link);
+	if (ls->tree) wlr_scene_node_destroy(&ls->tree->node);
+	free(ls);
+}
+
+/* ext-session-lock: the locker creates one surface per output. It has to
+ * be configured to the output's size, placed over it, and given the
+ * keyboard, or the lock never covers anything (see session_lock_input_ok
+ * for the pointer side). */
+static void session_lock_new_surface(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	struct wlr_session_lock_surface_v1 *lock_surface = data;
+	struct wlr_box box;
+	wlr_output_layout_get_box(server.output_layout, lock_surface->output, &box);
+	if (wlr_box_empty(&box)) {
+		wlr_output_effective_resolution(lock_surface->output, &box.width, &box.height);
+	}
+	wlr_session_lock_surface_v1_configure(lock_surface, box.width, box.height);
+
+	struct bspwm_wlr_lock_surface *ls = calloc(1, sizeof(*ls));
+	if (!ls) return;
+	ls->lock_surface = lock_surface;
+	ls->tree = wlr_scene_tree_create(server.lock_tree);
+	if (ls->tree) {
+		wlr_scene_subsurface_tree_create(ls->tree, lock_surface->surface);
+		wlr_scene_node_set_position(&ls->tree->node, box.x, box.y);
+	}
+	ls->map.notify = lock_surface_map;
+	wl_signal_add(&lock_surface->surface->events.map, &ls->map);
+	ls->destroy.notify = lock_surface_destroy;
+	wl_signal_add(&lock_surface->events.destroy, &ls->destroy);
+	if (lock_surface->surface->mapped) {
+		lock_surface_focus(lock_surface->surface);
+	}
+}
+
+static void session_lock_blank(bool on)
+{
+	if (on && !server.lock_blank) {
+		struct wlr_box all;
+		wlr_output_layout_get_box(server.output_layout, NULL, &all);
+		float black[4] = {0, 0, 0, 1};
+		server.lock_blank = wlr_scene_rect_create(server.lock_tree,
+			all.width > 0 ? all.width : 1, all.height > 0 ? all.height : 1, black);
+		if (server.lock_blank) {
+			wlr_scene_node_set_position(&server.lock_blank->node, all.x, all.y);
+			wlr_scene_node_lower_to_bottom(&server.lock_blank->node);
+		}
+	} else if (!on && server.lock_blank) {
+		wlr_scene_node_destroy(&server.lock_blank->node);
+		server.lock_blank = NULL;
+	}
+}
+
+static void session_lock_unlock(struct wl_listener *listener, void *data)
+{
+	(void)listener; (void)data;
+	server.locked = false;
+	session_lock_blank(false);
+	/* Hand the keyboard back to the core's focused window. */
+	update_input_focus();
+}
+
 static void session_lock_destroy(struct wl_listener *listener, void *data)
 {
 	(void)listener; (void)data;
+	wl_list_remove(&server.lock_destroy.link);
+	wl_list_remove(&server.lock_new_surface.link);
+	wl_list_remove(&server.lock_unlock.link);
 	server.active_lock = NULL;
-	server.locked = false;
+	/* A locker that dies without unlocking must not expose the session:
+	 * server.locked stays as it was and the blanking rect keeps covering
+	 * the outputs until another locker takes over. */
 }
 
 static void session_new_lock(struct wl_listener *listener, void *data)
@@ -1883,11 +2305,60 @@ static void session_new_lock(struct wl_listener *listener, void *data)
 
 	server.active_lock = lock;
 	server.locked = true;
+	session_lock_blank(true);
 
+	server.lock_new_surface.notify = session_lock_new_surface;
+	wl_signal_add(&lock->events.new_surface, &server.lock_new_surface);
+	server.lock_unlock.notify = session_lock_unlock;
+	wl_signal_add(&lock->events.unlock, &server.lock_unlock);
 	server.lock_destroy.notify = session_lock_destroy;
 	wl_signal_add(&lock->events.destroy, &server.lock_destroy);
 
 	wlr_session_lock_v1_send_locked(lock);
+}
+
+/* While locked, only lock surfaces may receive pointer input. */
+static bool session_lock_input_ok(struct wlr_surface *surface)
+{
+	if (!server.locked) return true;
+	return surface && wlr_session_lock_surface_v1_try_from_wlr_surface(surface) != NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Drag and drop                                                     */
+/* ------------------------------------------------------------------ */
+
+static void drag_destroy(struct wl_listener *listener, void *data)
+{
+	(void)listener; (void)data;
+	wl_list_remove(&server.drag_destroy.link);
+	server.drag_icon = NULL;
+}
+
+static void seat_request_start_drag(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	struct wlr_seat_request_start_drag_event *event = data;
+	if (wlr_seat_validate_pointer_grab_serial(server.seat, event->origin, event->serial)) {
+		wlr_seat_start_pointer_drag(server.seat, event->drag, event->serial);
+	} else {
+		wlr_data_source_destroy(event->drag->source);
+	}
+}
+
+static void seat_start_drag(struct wl_listener *listener, void *data)
+{
+	(void)listener;
+	struct wlr_drag *drag = data;
+	if (drag->icon) {
+		server.drag_icon = wlr_scene_drag_icon_create(&server.scene->tree, drag->icon);
+		if (server.drag_icon) {
+			wlr_scene_node_set_position(&server.drag_icon->node,
+				(int)server.cursor->x, (int)server.cursor->y);
+		}
+	}
+	server.drag_destroy.notify = drag_destroy;
+	wl_signal_add(&drag->events.destroy, &server.drag_destroy);
 }
 
 /* ================================================================== */
@@ -1956,6 +2427,7 @@ int backend_init(int *default_screen)
 	/* Remaining layer shell trees (above toplevels) */
 	server.layer_trees[2] = wlr_scene_tree_create(&server.scene->tree); /* top */
 	server.layer_trees[3] = wlr_scene_tree_create(&server.scene->tree); /* overlay */
+	server.lock_tree = wlr_scene_tree_create(&server.scene->tree);      /* session lock */
 
 	/* Foreign toplevel management (for bars like waybar) */
 	server.foreign_toplevel_mgr = wlr_foreign_toplevel_manager_v1_create(server.wl_display);
@@ -1963,6 +2435,8 @@ int backend_init(int *default_screen)
 	/* Idle inhibit + notifier */
 	server.idle_inhibit_mgr = wlr_idle_inhibit_v1_create(server.wl_display);
 	server.idle_notifier = wlr_idle_notifier_v1_create(server.wl_display);
+	server.new_idle_inhibitor.notify = new_idle_inhibitor;
+	wl_signal_add(&server.idle_inhibit_mgr->events.new_inhibitor, &server.new_idle_inhibitor);
 
 	/* XDG activation (urgency / focus stealing) */
 	server.xdg_activation = wlr_xdg_activation_v1_create(server.wl_display);
@@ -2026,6 +2500,10 @@ int backend_init(int *default_screen)
 	server.request_set_primary_selection.notify = seat_request_set_primary_selection;
 	wl_signal_add(&server.seat->events.request_set_primary_selection,
 		&server.request_set_primary_selection);
+	server.request_start_drag.notify = seat_request_start_drag;
+	wl_signal_add(&server.seat->events.request_start_drag, &server.request_start_drag);
+	server.start_drag.notify = seat_start_drag;
+	wl_signal_add(&server.seat->events.start_drag, &server.start_drag);
 
 	/* Selections: primary (middle-click paste) and data-control (clipboard
 	 * managers such as nocb, wl-paste --watch, cliphist). */
@@ -2080,6 +2558,11 @@ int backend_init(int *default_screen)
 		return -1;
 	}
 	setenv("WAYLAND_DISPLAY", server.socket, true);
+	{
+		const char *d = getenv("DISPLAY");
+		free(server.inherited_display);
+		server.inherited_display = d ? strdup(d) : NULL;
+	}
 	if (server.xwayland) {
 		/* A non-lazy Xwayland is started from an idle callback, so its
 		 * display name is still empty here. Run the idle sources now: the
@@ -2138,10 +2621,33 @@ void backend_destroy(void)
 		wl_list_remove(&server.gamma_set.link);
 		wl_list_remove(&server.output_mgr_apply.link);
 		wl_list_remove(&server.output_mgr_test.link);
+		wl_list_remove(&server.workspace_commit.link);
+		wl_list_remove(&server.new_idle_inhibitor.link);
+		wl_list_remove(&server.request_start_drag.link);
+		wl_list_remove(&server.start_drag.link);
+		if (server.active_lock) {
+			wl_list_remove(&server.lock_destroy.link);
+			wl_list_remove(&server.lock_new_surface.link);
+			wl_list_remove(&server.lock_unlock.link);
+			server.active_lock = NULL;
+		}
+		{
+			struct bspwm_wlr_ws *w, *wt;
+			wl_list_for_each_safe(w, wt, &server.workspaces, link) { wl_list_remove(&w->link); free(w); }
+			struct bspwm_wlr_ws_group *g, *gt;
+			wl_list_for_each_safe(g, gt, &server.ws_groups, link) { wl_list_remove(&g->link); free(g); }
+		}
 		if (server.xwayland) {
 			wl_list_remove(&server.xwayland_new_surface.link);
 			wl_list_remove(&server.xwayland_ready.link);
 		}
+
+		if (server.inherited_display) {
+			setenv("DISPLAY", server.inherited_display, true);
+		} else {
+			unsetenv("DISPLAY");
+		}
+		unsetenv("WAYLAND_DISPLAY");
 
 		wlr_scene_node_destroy(&server.scene->tree.node);
 		wlr_xcursor_manager_destroy(server.cursor_mgr);
@@ -2224,6 +2730,11 @@ void backend_window_show(bspwm_wid_t win)
 		wlr_scene_node_set_enabled(&tl->scene_tree->node, true);
 		return;
 	}
+	struct bspwm_wlr_xwayland_surface *xs = xsurface_from_id(win);
+	if (xs && xs->scene_tree) {
+		wlr_scene_node_set_enabled(&xs->scene_tree->node, true);
+		return;
+	}
 	struct bspwm_wlr_presel *p = presel_from_id(win);
 	if (p && p->rect) {
 		wlr_scene_node_set_enabled(&p->rect->node, true);
@@ -2235,6 +2746,19 @@ void backend_window_hide(bspwm_wid_t win)
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (tl && tl->scene_tree) {
 		wlr_scene_node_set_enabled(&tl->scene_tree->node, false);
+		/* The seat may still point at this surface; the next click would
+		 * otherwise go to an invisible window on another desktop. */
+		if (server.seat->pointer_state.focused_surface == tl->xdg_toplevel->base->surface) {
+			wlr_seat_pointer_clear_focus(server.seat);
+		}
+		return;
+	}
+	struct bspwm_wlr_xwayland_surface *xs = xsurface_from_id(win);
+	if (xs && xs->scene_tree) {
+		wlr_scene_node_set_enabled(&xs->scene_tree->node, false);
+		if (server.seat->pointer_state.focused_surface == xs->xsurface->surface) {
+			wlr_seat_pointer_clear_focus(server.seat);
+		}
 		return;
 	}
 	struct bspwm_wlr_presel *p = presel_from_id(win);
@@ -2295,6 +2819,16 @@ void backend_window_move_resize(bspwm_wid_t win, int16_t x, int16_t y, uint16_t 
 		toplevel_update_borders(tl);
 		return;
 	}
+	struct bspwm_wlr_xwayland_surface *xs = xsurface_from_id(win);
+	if (xs) {
+		xs->x = x; xs->y = y; xs->width = w; xs->height = h;
+		xs->managed_geometry = true;
+		wlr_xwayland_surface_configure(xs->xsurface, x, y, w, h);
+		if (xs->scene_tree) {
+			wlr_scene_node_set_position(&xs->scene_tree->node, x, y);
+		}
+		return;
+	}
 	struct bspwm_wlr_presel *p = presel_from_id(win);
 	if (p && p->rect) {
 		wlr_scene_node_set_position(&p->rect->node, x, y);
@@ -2325,12 +2859,22 @@ bool backend_window_exists(bspwm_wid_t win)
 bool backend_window_get_geometry(bspwm_wid_t win, bspwm_rect_t *rect)
 {
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
-	if (!tl) return false;
-	rect->x = tl->scene_tree->node.x;
-	rect->y = tl->scene_tree->node.y;
-	rect->width = tl->xdg_toplevel->base->geometry.width;
-	rect->height = tl->xdg_toplevel->base->geometry.height;
-	return true;
+	if (tl) {
+		rect->x = tl->scene_tree->node.x;
+		rect->y = tl->scene_tree->node.y;
+		rect->width = tl->xdg_toplevel->base->geometry.width;
+		rect->height = tl->xdg_toplevel->base->geometry.height;
+		return true;
+	}
+	struct bspwm_wlr_xwayland_surface *xs = xsurface_from_id(win);
+	if (xs) {
+		rect->x = xs->scene_tree ? xs->scene_tree->node.x : xs->xsurface->x;
+		rect->y = xs->scene_tree ? xs->scene_tree->node.y : xs->xsurface->y;
+		rect->width = xs->xsurface->width;
+		rect->height = xs->xsurface->height;
+		return true;
+	}
+	return false;
 }
 
 void backend_window_listen_enter(bspwm_wid_t win, bool enable)
@@ -2343,12 +2887,23 @@ void backend_window_listen_enter(bspwm_wid_t win, bool enable)
 /*  Stacking                                                          */
 /* ------------------------------------------------------------------ */
 
+static struct wlr_scene_node *scene_node_from_id(bspwm_wid_t id)
+{
+	struct bspwm_wlr_toplevel *tl = toplevel_from_id(id);
+	if (tl && tl->scene_tree) return &tl->scene_tree->node;
+	struct bspwm_wlr_xwayland_surface *xs = xsurface_from_id(id);
+	if (xs && xs->scene_tree) return &xs->scene_tree->node;
+	struct bspwm_wlr_presel *p = presel_from_id(id);
+	if (p && p->rect) return &p->rect->node;
+	return NULL;
+}
+
 void backend_window_stack_above(bspwm_wid_t w1, bspwm_wid_t w2)
 {
-	struct bspwm_wlr_toplevel *tl1 = toplevel_from_id(w1);
-	struct bspwm_wlr_toplevel *tl2 = toplevel_from_id(w2);
-	if (tl1 && tl2 && tl1->scene_tree && tl2->scene_tree) {
-		wlr_scene_node_place_above(&tl1->scene_tree->node, &tl2->scene_tree->node);
+	struct wlr_scene_node *n1 = scene_node_from_id(w1);
+	struct wlr_scene_node *n2 = scene_node_from_id(w2);
+	if (n1 && n2 && n1->parent == n2->parent) {
+		wlr_scene_node_place_above(n1, n2);
 	}
 }
 
@@ -2363,15 +2918,8 @@ void backend_window_stack_below(bspwm_wid_t w1, bspwm_wid_t w2)
 
 void backend_window_raise(bspwm_wid_t win)
 {
-	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
-	if (tl && tl->scene_tree) {
-		wlr_scene_node_raise_to_top(&tl->scene_tree->node);
-		return;
-	}
-	struct bspwm_wlr_presel *p = presel_from_id(win);
-	if (p && p->rect) {
-		wlr_scene_node_raise_to_top(&p->rect->node);
-	}
+	struct wlr_scene_node *n = scene_node_from_id(win);
+	if (n) wlr_scene_node_raise_to_top(n);
 }
 
 void backend_window_lower(bspwm_wid_t win)
@@ -2391,14 +2939,49 @@ void backend_window_lower(bspwm_wid_t win)
 /*  Focus                                                             */
 /* ------------------------------------------------------------------ */
 
+static void deactivate_surface(struct wlr_surface *prev)
+{
+	if (!prev) return;
+	struct wlr_xdg_toplevel *prev_tl = wlr_xdg_toplevel_try_from_wlr_surface(prev);
+	if (prev_tl) {
+		wlr_xdg_toplevel_set_activated(prev_tl, false);
+		struct bspwm_wlr_toplevel *ptl = toplevel_from_xdg(prev_tl);
+		if (ptl && ptl->foreign_handle)
+			wlr_foreign_toplevel_handle_v1_set_activated(ptl->foreign_handle, false);
+		return;
+	}
+	struct wlr_xwayland_surface *pxs = wlr_xwayland_surface_try_from_wlr_surface(prev);
+	if (pxs) {
+		wlr_xwayland_surface_activate(pxs, false);
+	}
+}
+
 void backend_set_input_focus(bspwm_wid_t win)
 {
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
-	if (!tl) return;
+	if (!tl) {
+		struct bspwm_wlr_xwayland_surface *xs = xsurface_from_id(win);
+		if (!xs || !xs->xsurface->surface || server.focused_layer || server.locked) return;
+		last_hover_id = BSPWM_WID_NONE;
+		struct wlr_surface *xsurf = xs->xsurface->surface;
+		struct wlr_surface *xprev = server.seat->keyboard_state.focused_surface;
+		if (xprev == xsurf) return;
+		deactivate_surface(xprev);
+		wlr_xwayland_surface_activate(xs->xsurface, true);
+		struct wlr_keyboard *kb = wlr_seat_get_keyboard(server.seat);
+		if (kb) {
+			wlr_seat_keyboard_notify_enter(server.seat, xsurf,
+				kb->keycodes, kb->num_keycodes, &kb->modifiers);
+		} else {
+			wlr_seat_keyboard_notify_enter(server.seat, xsurf, NULL, 0, NULL);
+		}
+		return;
+	}
 
 	/* A launcher or lock surface holds the keyboard; the core's choice is
 	 * re-applied from update_input_focus() when it goes away. */
-	if (server.focused_layer) return;
+	if (server.focused_layer || server.locked) return;
+	last_hover_id = BSPWM_WID_NONE;
 
 	struct wlr_surface *surface = tl->xdg_toplevel->base->surface;
 	struct wlr_seat *seat = server.seat;
@@ -2407,12 +2990,7 @@ void backend_set_input_focus(bspwm_wid_t win)
 	struct wlr_surface *prev = seat->keyboard_state.focused_surface;
 	if (prev == surface) return;
 
-	if (prev) {
-		struct wlr_xdg_toplevel *prev_tl =
-			wlr_xdg_toplevel_try_from_wlr_surface(prev);
-		if (prev_tl)
-			wlr_xdg_toplevel_set_activated(prev_tl, false);
-	}
+	deactivate_surface(prev);
 
 	/* Activate new */
 	wlr_xdg_toplevel_set_activated(tl->xdg_toplevel, true);
@@ -2429,14 +3007,10 @@ void backend_set_input_focus(bspwm_wid_t win)
 
 void backend_clear_input_focus(void)
 {
-	if (server.focused_layer) return;
+	if (server.focused_layer || server.locked) return;
+	last_hover_id = BSPWM_WID_NONE;
 	struct wlr_surface *prev = server.seat->keyboard_state.focused_surface;
-	if (prev) {
-		struct wlr_xdg_toplevel *prev_tl =
-			wlr_xdg_toplevel_try_from_wlr_surface(prev);
-		if (prev_tl)
-			wlr_xdg_toplevel_set_activated(prev_tl, false);
-	}
+	deactivate_surface(prev);
 	wlr_seat_keyboard_clear_focus(server.seat);
 }
 
@@ -2777,15 +3351,7 @@ void backend_query_pointer(bspwm_wid_t *win, bspwm_point_t *pos)
 		double sx, sy;
 		struct wlr_scene_node *node = wlr_scene_node_at(
 			&server.scene->tree.node, server.cursor->x, server.cursor->y, &sx, &sy);
-		*win = BSPWM_WID_NONE;
-		while (node) {
-			if (node->data) {
-				struct bspwm_wlr_toplevel *tl = node->data;
-				*win = tl->id;
-				break;
-			}
-			node = &node->parent->node;
-		}
+		*win = window_id_from_node(node);
 	}
 }
 
@@ -2793,6 +3359,8 @@ void backend_warp_pointer(bspwm_rect_t rect)
 {
 	wlr_cursor_warp(server.cursor, NULL,
 		rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+	/* Deliver leave/enter for the surfaces under the old and new spot. */
+	process_cursor_motion(0);
 }
 
 void backend_enable_motion_recorder(bspwm_wid_t win) { (void)win; }
@@ -2819,7 +3387,7 @@ bspwm_wid_t backend_create_presel_feedback(uint32_t color)
 	if (!p) return ++server.next_toplevel_id;
 
 	p->id = ++server.next_toplevel_id;
-	p->rect = wlr_scene_rect_create(&server.scene->tree, 1, 1, fcolor);
+	p->rect = wlr_scene_rect_create(server.window_tree, 1, 1, fcolor);
 	wlr_scene_node_set_enabled(&p->rect->node, false);
 
 	wl_list_insert(&presel_list, &p->link);
@@ -2835,6 +3403,11 @@ void backend_close_window(bspwm_wid_t win)
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (tl) {
 		wlr_xdg_toplevel_send_close(tl->xdg_toplevel);
+		return;
+	}
+	struct bspwm_wlr_xwayland_surface *xs = xsurface_from_id(win);
+	if (xs) {
+		wlr_xwayland_surface_close(xs->xsurface);
 	}
 }
 

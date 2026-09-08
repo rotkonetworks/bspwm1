@@ -67,7 +67,7 @@ make BACKEND=wlroots install   # installs bspwm-wl, bspc and the wayland-session
 make BACKEND=wlroots WLROOTS_DIR=../wlroots WLROOTS_ABI=0.21   # or against a wlroots source checkout
 ```
 
-each backend is a separate build and a separate binary. objects go under `build/<backend>/`, so the two can be built and installed side by side. `bspc` is shared and links no display library. the wayland build has no sxhkd: keybindings are handled in-process via `bspc keybind`. github releases and the aur package build the X11 backend only.
+each backend is a separate build and a separate binary. objects go under `build/<backend>/`, so the two can be built and installed side by side. `bspc` is shared and links no display library. the wayland build has no sxhkd: keybindings are handled in-process via `bspc keybind`. bars: waybar with `ext/workspaces` for desktops and `wlr/taskbar` for windows. a compositor restart (`bspc wm -r`) closes every client, as on any Wayland compositor. github releases and the aur package build the X11 backend only.
 
 dependencies (x11): libxcb, xcb-util, xcb-util-keysyms, xcb-util-wm, libxkbcommon
 dependencies (wlroots): wlroots 0.20, wayland, wayland-protocols, wlr-protocols, libxkbcommon, pixman, libdrm, xorg-xwayland

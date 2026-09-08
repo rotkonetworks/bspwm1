@@ -1,3 +1,88 @@
+# v1.6.4
+
+Wayland compositor release. Five independent reviews of `backend_wlr.c`
+and `window_ops.c` against the wlroots 0.20 headers, followed by nested runs
+with waybar, wofi, foot, alacritty, mpv, xterm through Xwayland and
+swaylock. Everything below was reproduced before it was fixed. X11 is
+unaffected except where noted.
+
+### Fixed
+
+- **Launchers rendered under windows and could not be typed into.** All
+  windows were parented to the scene root after the top and overlay layer
+  trees, and layer surfaces never received keyboard focus. Windows now live
+  in their own tree between bottom and top; a layer surface that asks for
+  keyboard interactivity (wofi, rofi, lock screens) gets the keyboard on map
+  and hands it back through `update_input_focus()` when it goes.
+- **Fullscreen was never communicated to clients.** `wlr_xdg_toplevel_set_fullscreen`
+  was never called, so browsers kept their chrome and mpv its controls; a
+  client's unfullscreen request re-requested fullscreen; `mpv --fs` sent
+  before map was dropped. The state is now sent in both directions and an
+  initial request is honoured at manage time.
+- **Xwayland windows were managed by the core but ignored by every backend
+  operation**: no geometry, no focus, no hide on desktop switch, no close.
+  Chromium, Steam and every other X client now tile, focus, hide and close
+  like Wayland ones. Their scene tree lifetime across X unmap/remap was a
+  use-after-free.
+- **`bspc wm -r` left the compositor with ghost nodes** whose ids collided
+  with the next windows, so new windows were never managed after a restart.
+  Dead nodes are now pruned by walking the tree instead of trusting the
+  recorded client count. Note that a compositor restart still closes every
+  client; that is inherent to Wayland.
+- **Session lock did nothing**: lock surfaces were never configured, input
+  kept flowing to the desktop, a crashed locker unlocked the session, and
+  unlocking aborted the compositor on a listener that was never removed.
+  Lock surfaces are now placed over their outputs and given the keyboard,
+  pointer and keyboard input is confined to them, unlock restores focus,
+  and a locker that dies leaves the screen blanked.
+- **swayidle locked the screen while typing**: no input activity was ever
+  reported to the idle notifier and inhibitors were ignored.
+- **A maximize request before the initial commit aborted the compositor**
+  (GTK and Chromium restoring a maximized window).
+- **Popups whose parent is a layer surface never mapped** (waybar menus and
+  tooltips), and popups were never unconstrained, so menus near an edge
+  opened off screen.
+- **Bars on a second monitor were drawn on the first** (layer surfaces
+  configured in output-local instead of layout coordinates), and every bar
+  redraw overwrote the user's `top_padding` etc. Struts are now applied as
+  a delta on top of the configured padding.
+- Output mode/transform changes from the backend did not reach the core;
+  layer surfaces outlived a removed output; hotplugged outputs prepended to
+  the list and stole the primary role.
+- Floating toggles did not move the window: the wlroots `get_window_rectangle`
+  returned the desired rectangle, so `apply_layout` saw nothing to do. It now
+  reports the real geometry.
+- `manage_window` on wlroots mirrors the X11 one: hidden/other-desktop
+  windows are hidden instead of shown, floating/fullscreen rules do not
+  leave a hole in the tiling, layer/state go through `set_state`, private,
+  locked, marked, split direction and ratio rules apply, dialogs at 0,0
+  are centred, and a rule targeting an unfocused monitor no longer steals
+  monitor focus. A window closed while its external rule ran no longer
+  becomes an unremovable ghost.
+- `bspc node -z` on a tiled window moved the split fence on X11 but resized
+  the surface off its tile on wlroots; both backends share the logic now.
+  `honor_size_hints` was ignored on wlroots.
+- focus_follows_pointer now uses the X11 semantics (global focus, monitor
+  under the pointer), pointer_follows_focus no longer fires back during
+  pointer-driven focus changes, Super+click focuses through the core so
+  `bspc` and the keyboard agree, and a pointer warp delivers enter/leave.
+- Drag and drop never started (no `request_start_drag` handling); the seat
+  never dropped the keyboard capability when the last keyboard left; an
+  interactive resize left the border box at the old size; a window destroyed
+  mid-drag was dereferenced on the next motion event.
+- Foreign-toplevel handles now enter their output, follow title changes,
+  deactivate the previous window, and honour taskbar activate/close.
+
+### New
+
+- **ext-workspace-v1**: desktops are published as workspaces, so waybar's
+  `ext/workspaces` module shows and switches them. `bspwm/workspaces` was
+  never a waybar module.
+- wlr-output-management (wlr-randr, kanshi), primary selection, data-control,
+  presentation-time, single-pixel-buffer, output power management,
+  cursor-shape and gamma control (from 1.6.3's work, listed here for
+  completeness of the Wayland surface).
+
 # v1.6.3
 
 ### Fixed

@@ -188,9 +188,15 @@ uint32_t get_border_color(bool focused_node, bool focused_monitor)
 
 void draw_border(node_t *n, bool focused_node, bool focused_monitor)
 {
-	if (!n || !n->client) return;
+	if (!n) return;
 	uint32_t color = get_border_color(focused_node, focused_monitor);
-	window_draw_border(n->id, color);
+	/* The core passes internal nodes (set_hidden, transfer_node, focus of
+	 * a subtree); paint every leaf like the X11 backend does. */
+	for (node_t *f = first_extrema(n); f != NULL; f = next_leaf(f, n)) {
+		if (f->client) {
+			window_draw_border(f->id, color);
+		}
+	}
 }
 
 void update_colors_in(node_t *n, desktop_t *d, monitor_t *m)
@@ -217,6 +223,13 @@ void hide_presel_feedbacks(monitor_t *m, desktop_t *d, node_t *n) { (void)m; (vo
 bspwm_rect_t get_window_rectangle(node_t *n)
 {
 	if (!n || !n->client) return (bspwm_rect_t){0, 0, 0, 0};
+	/* apply_layout compares this against the wanted rectangle and only
+	 * moves the window when they differ, so it has to be the real current
+	 * geometry, not the desired one (or state changes never move anything). */
+	bspwm_rect_t r;
+	if (backend_window_get_geometry(n->id, &r)) {
+		return r;
+	}
 	if (IS_FLOATING(n->client))
 		return n->client->floating_rectangle;
 	return n->client->tiled_rectangle;
@@ -236,6 +249,7 @@ void initialize_floating_rectangle(node_t *n)
 void apply_size_hints(client_t *c, uint16_t *width, uint16_t *height)
 {
 	if (!c || !width || !height) return;
+	if (!SHOULD_HONOR_SIZE_HINTS(c->honor_size_hints, c->state)) return;
 
 	bspwm_size_hints_t *sh = &c->size_hints;
 	if (sh->flags & BSP_SIZE_HINT_P_MIN_SIZE) {
@@ -269,6 +283,17 @@ void schedule_window(bspwm_wid_t win)
 	}
 }
 
+static void free_consequence(rule_consequence_t *csq)
+{
+	free(csq->rect); csq->rect = NULL;
+	free(csq->layer); csq->layer = NULL;
+	free(csq->state); csq->state = NULL;
+	free(csq->split_dir); csq->split_dir = NULL;
+}
+
+/* Mirrors src/window.c's manage_window minus the X11-only pieces (event
+ * masks, button grabs, WM_STATE). Everything that decides where a window
+ * goes and what state it starts in must behave the same on both backends. */
 bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 {
 	if (!csq) return false;
@@ -276,10 +301,8 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	parse_rule_consequence(fd, csq);
 
 	if (!csq->manage) {
-		free(csq->rect);
-		free(csq->layer);
-		free(csq->state);
-		free(csq->split_dir);
+		free_consequence(csq);
+		backend_window_show(win);
 		return false;
 	}
 
@@ -287,88 +310,153 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	desktop_t *d = m ? m->desk : NULL;
 	node_t *f = d ? d->focus : NULL;
 
-	if (csq->monitor_desc[0] != '\0') {
-		coordinates_t mloc;
-		if (monitor_from_desc(csq->monitor_desc, &(coordinates_t){m, d, f}, &mloc) == SELECTOR_OK) {
-			m = mloc.monitor;
-			d = m->desk;
-			f = d ? d->focus : NULL;
+	if (csq->node_desc[0] != '\0') {
+		coordinates_t ref = {m, d, f};
+		coordinates_t trg = {NULL, NULL, NULL};
+		if (node_from_desc(csq->node_desc, &ref, &trg) == SELECTOR_OK) {
+			m = trg.monitor;
+			d = trg.desktop;
+			f = trg.node;
+		}
+	} else if (csq->desktop_desc[0] != '\0') {
+		coordinates_t ref = {m, d, NULL};
+		coordinates_t trg = {NULL, NULL, NULL};
+		if (desktop_from_desc(csq->desktop_desc, &ref, &trg) == SELECTOR_OK) {
+			m = trg.monitor;
+			d = trg.desktop;
+			f = trg.desktop->focus;
+		}
+	} else if (csq->monitor_desc[0] != '\0') {
+		coordinates_t ref = {m, NULL, NULL};
+		coordinates_t trg = {NULL, NULL, NULL};
+		if (monitor_from_desc(csq->monitor_desc, &ref, &trg) == SELECTOR_OK) {
+			m = trg.monitor;
+			d = trg.monitor->desk;
+			f = trg.monitor->desk ? trg.monitor->desk->focus : NULL;
 		}
 	}
-	if (csq->desktop_desc[0] != '\0') {
-		coordinates_t dloc;
-		if (desktop_from_desc(csq->desktop_desc, &(coordinates_t){m, d, f}, &dloc) == SELECTOR_OK) {
-			m = dloc.monitor;
-			d = dloc.desktop;
-			f = d ? d->focus : NULL;
-		}
+
+	if (csq->sticky && mon && mon->desk) {
+		m = mon;
+		d = mon->desk;
+		f = mon->desk->focus;
 	}
 
 	if (!m || !d) {
-		free(csq->rect);
-		free(csq->layer);
-		free(csq->state);
-		free(csq->split_dir);
+		free_consequence(csq);
 		return false;
 	}
 
-	node_t *n = make_node(win);
-	client_t *c = make_client();
-	n->client = c;
-
-	/* Copy rule consequence data */
-	snprintf(c->class_name, sizeof(c->class_name), "%s", csq->class_name);
-	snprintf(c->instance_name, sizeof(c->instance_name), "%s", csq->instance_name);
-	snprintf(c->name, sizeof(c->name), "%s", csq->name);
-
-	if (csq->state)
-		c->state = c->last_state = *csq->state;
-	if (csq->layer)
-		c->layer = c->last_layer = *csq->layer;
-
-	initialize_client(n);
-	initialize_floating_rectangle(n);
-
-	if (csq->rect) {
-		c->floating_rectangle = *csq->rect;
+	if (csq->split_dir != NULL && f != NULL) {
+		presel_dir(m, d, f, *csq->split_dir);
 	}
+	if (csq->split_ratio != 0 && f != NULL) {
+		presel_ratio(m, d, f, csq->split_ratio);
+	}
+
+	node_t *n = make_node(win);
+	if (n == NULL) {
+		free_consequence(csq);
+		return false;
+	}
+	client_t *c = make_client();
+	if (c == NULL) {
+		free_node(n);
+		free_consequence(csq);
+		return false;
+	}
+	c->border_width = csq->border ? d->border_width : 0;
+	n->client = c;
+	initialize_client(n);
+
+	if (csq->rect != NULL) {
+		c->floating_rectangle = *csq->rect;
+	} else {
+		initialize_floating_rectangle(n);
+		/* A client that comes up at 0,0 has no position of its own;
+		 * every transient/dialog otherwise lands in the top-left corner. */
+		if (c->floating_rectangle.x == 0 && c->floating_rectangle.y == 0) {
+			csq->center = true;
+		}
+	}
+
+	monitor_t *mm = monitor_from_client(c);
+	if (mm == NULL) mm = m;
+	embrace_client(mm, c);
+	adapt_geometry(&mm->rectangle, &m->rectangle, n);
+
 	if (csq->center) {
 		window_center(m, c);
 	}
 
-	/* Insert into tree */
-	insert_node(m, d, n, f);
+	snprintf(c->class_name, sizeof(c->class_name), "%s", csq->class_name);
+	snprintf(c->instance_name, sizeof(c->instance_name), "%s", csq->instance_name);
+	snprintf(c->name, sizeof(c->name), "%s", csq->name);
 
-	if (csq->hidden) set_hidden(m, d, n, true);
-	if (csq->sticky) set_sticky(m, d, n, true);
-
-	c->border_width = csq->border ? d->border_width : 0;
-
-	/* Apply */
-	arrange(m, d);
-	stack(d, n, d->focus == n);
-
-	backend_window_set_border_width(win, c->border_width);
-	uint32_t bcolor = get_border_color(d->focus == n, mon == m);
-	backend_window_set_border_color(win, bcolor);
-
-	backend_window_show(win);
-	c->shown = true;
-
-	if (csq->focus && d == m->desk) {
-		focus_node(m, d, n);
+	/* A window that starts floating, fullscreen or hidden must not take a
+	 * tile: the split is decided at insert time. */
+	if ((csq->state != NULL && (*(csq->state) == STATE_FLOATING || *(csq->state) == STATE_FULLSCREEN)) || csq->hidden) {
+		n->vacant = true;
 	}
 
-	ewmh_update_client_lists();
+	f = insert_node(m, d, n, f);
+	clients_count++;
+	if (single_monocle && d->layout == LAYOUT_MONOCLE && tiled_count(d->root, true) > 1) {
+		set_layout(m, d, d->user_layout, false);
+	}
+
+	n->vacant = false;
 
 	put_status(SBSC_MASK_NODE_ADD, "node_add 0x%08X 0x%08X 0x%08X 0x%08X\n",
 	           m->id, d->id, f ? f->id : 0, win);
 
-	free(csq->rect);
-	free(csq->layer);
-	free(csq->state);
-	free(csq->split_dir);
+	if (f != NULL && f->client != NULL && csq->state != NULL && *(csq->state) == STATE_FLOATING) {
+		c->layer = f->client->layer;
+	}
+	if (csq->layer != NULL) {
+		c->layer = *(csq->layer);
+	}
+	if (csq->state != NULL) {
+		set_state(m, d, n, *(csq->state));
+	}
+	enforce_layer_invariant(m, d, n);
 
+	if (csq->honor_size_hints != HONOR_SIZE_HINTS_DEFAULT) {
+		c->honor_size_hints = csq->honor_size_hints;
+	}
+
+	set_hidden(m, d, n, csq->hidden);
+	set_sticky(m, d, n, csq->sticky);
+	set_private(m, d, n, csq->private);
+	set_locked(m, d, n, csq->locked);
+	set_marked(m, d, n, csq->marked);
+
+	arrange(m, d);
+
+	backend_window_set_border_width(win, c->border_width);
+
+	/* Visible only if its desktop is the one shown on its monitor. */
+	if (d == m->desk) {
+		show_node(d, n);
+	} else {
+		hide_node(d, n);
+	}
+
+	ewmh_update_client_lists();
+	ewmh_set_wm_desktop(n, d);
+
+	if (!csq->hidden && csq->focus) {
+		if (d == mon->desk || csq->follow) {
+			focus_node(m, d, n);
+		} else {
+			activate_node(m, d, n);
+		}
+	} else {
+		stack(d, n, false);
+		draw_border(n, false, (m == mon));
+	}
+
+	free_consequence(csq);
 	return true;
 }
 
@@ -385,6 +473,15 @@ void unmanage_window(bspwm_wid_t win)
 		           loc.monitor->id, loc.desktop->id, win);
 		remove_node(loc.monitor, loc.desktop, loc.node);
 		arrange(loc.monitor, loc.desktop);
+	} else {
+		/* Closed while its external rule was still running: drop the
+		 * pending rule, or manage_window later inserts a dead id. */
+		for (pending_rule_t *pr = pending_rule_head; pr != NULL; pr = pr->next) {
+			if (pr->win == win) {
+				remove_pending_rule(pr);
+				return;
+			}
+		}
 	}
 }
 
@@ -395,24 +492,149 @@ void adopt_orphans(void)
 
 bool move_client(coordinates_t *loc, int dx, int dy)
 {
-	if (!loc || !loc->node || !loc->node->client) return false;
-	client_t *c = loc->node->client;
-	c->floating_rectangle.x += dx;
-	c->floating_rectangle.y += dy;
-	bspwm_rect_t r = c->floating_rectangle;
-	window_move_resize(loc->node->id, r.x, r.y, r.width, r.height);
+	node_t *n = loc->node;
+	if (n == NULL || n->client == NULL) {
+		return false;
+	}
+
+	monitor_t *pm = NULL;
+
+	if (IS_TILED(n->client)) {
+		/* Tiled windows only move by pointer drag, where the drop target
+		 * decides: swap with the tiled window under the pointer, or move
+		 * to the monitor under it. */
+		if (!grabbing) {
+			return false;
+		}
+		bspwm_wid_t pwin = BSPWM_WID_NONE;
+		backend_query_pointer(&pwin, NULL);
+		if (pwin == n->id) {
+			return false;
+		}
+		coordinates_t dst;
+		bool is_managed = (pwin != BSPWM_WID_NONE && locate_window(pwin, &dst));
+		if (is_managed && dst.monitor == loc->monitor && IS_TILED(dst.node->client)) {
+			swap_nodes(loc->monitor, loc->desktop, n, loc->monitor, loc->desktop, dst.node, false);
+			return true;
+		} else if (is_managed && dst.monitor == loc->monitor) {
+			return false;
+		} else {
+			bspwm_point_t pt = {0, 0};
+			backend_query_pointer(NULL, &pt);
+			pm = monitor_from_point(pt);
+		}
+	} else {
+		client_t *c = n->client;
+		bspwm_rect_t rect = c->floating_rectangle;
+		int16_t x = rect.x + dx;
+		int16_t y = rect.y + dy;
+		window_move_resize(n->id, x, y, rect.width, rect.height);
+		c->floating_rectangle.x = x;
+		c->floating_rectangle.y = y;
+		if (!grabbing) {
+			put_status(SBSC_MASK_NODE_GEOMETRY, "node_geometry 0x%08X 0x%08X 0x%08X %ux%u+%i+%i\n",
+			           loc->monitor->id, loc->desktop->id, loc->node->id, rect.width, rect.height, x, y);
+		}
+		pm = monitor_from_client(c);
+	}
+
+	if (pm == NULL || pm == loc->monitor) {
+		return true;
+	}
+
+	transfer_node(loc->monitor, loc->desktop, n, pm, pm->desk, pm->desk->focus, true);
+	loc->monitor = pm;
+	loc->desktop = pm->desk;
 	return true;
 }
 
 bool resize_client(coordinates_t *loc, resize_handle_t rh, int dx, int dy, bool relative)
 {
-	(void)rh; (void)relative;
-	if (!loc || !loc->node || !loc->node->client) return false;
-	client_t *c = loc->node->client;
-	c->floating_rectangle.width += dx;
-	c->floating_rectangle.height += dy;
-	bspwm_rect_t r = c->floating_rectangle;
-	window_move_resize(loc->node->id, r.x, r.y, r.width, r.height);
+	node_t *n = loc->node;
+	if (n == NULL || n->client == NULL || n->client->state == STATE_FULLSCREEN) {
+		return false;
+	}
+	node_t *horizontal_fence = NULL, *vertical_fence = NULL;
+	bspwm_rect_t rect = get_rectangle(NULL, NULL, n);
+	uint16_t width = rect.width, height = rect.height;
+	int16_t x = rect.x, y = rect.y;
+	if (n->client->state == STATE_TILED) {
+		/* Resizing a tiled window means moving the split it borders. */
+		if (rh & HANDLE_LEFT) {
+			vertical_fence = find_fence(n, DIR_WEST);
+		} else if (rh & HANDLE_RIGHT) {
+			vertical_fence = find_fence(n, DIR_EAST);
+		}
+		if (rh & HANDLE_TOP) {
+			horizontal_fence = find_fence(n, DIR_NORTH);
+		} else if (rh & HANDLE_BOTTOM) {
+			horizontal_fence = find_fence(n, DIR_SOUTH);
+		}
+		if (vertical_fence == NULL && horizontal_fence == NULL) {
+			return false;
+		}
+		if (vertical_fence != NULL) {
+			double sr;
+			if (relative) {
+				sr = vertical_fence->split_ratio + (double) dx / (double) vertical_fence->rectangle.width;
+			} else {
+				sr = (double) (dx - vertical_fence->rectangle.x) / (double) vertical_fence->rectangle.width;
+			}
+			sr = MAX(0, sr);
+			sr = MIN(1, sr);
+			vertical_fence->split_ratio = sr;
+			adjust_ratios(vertical_fence, vertical_fence->rectangle);
+		}
+		if (horizontal_fence != NULL) {
+			double sr;
+			if (relative) {
+				sr = horizontal_fence->split_ratio + (double) dy / (double) horizontal_fence->rectangle.height;
+			} else {
+				sr = (double) (dy - horizontal_fence->rectangle.y) / (double) horizontal_fence->rectangle.height;
+			}
+			sr = MAX(0, sr);
+			sr = MIN(1, sr);
+			horizontal_fence->split_ratio = sr;
+			adjust_ratios(horizontal_fence, horizontal_fence->rectangle);
+		}
+		arrange(loc->monitor, loc->desktop);
+	} else {
+		int w = width, h = height;
+		if (relative) {
+			w += dx * (rh & HANDLE_LEFT ? -1 : (rh & HANDLE_RIGHT ? 1 : 0));
+			h += dy * (rh & HANDLE_TOP ? -1 : (rh & HANDLE_BOTTOM ? 1 : 0));
+		} else {
+			if (rh & HANDLE_LEFT) {
+				w = x + width - dx;
+			} else if (rh & HANDLE_RIGHT) {
+				w = dx - x;
+			}
+			if (rh & HANDLE_TOP) {
+				h = y + height - dy;
+			} else if (rh & HANDLE_BOTTOM) {
+				h = dy - y;
+			}
+		}
+		width = MIN(MAX(1, w), UINT16_MAX);
+		height = MIN(MAX(1, h), UINT16_MAX);
+		apply_size_hints(n->client, &width, &height);
+		if (rh & HANDLE_LEFT) {
+			x += rect.width - width;
+		}
+		if (rh & HANDLE_TOP) {
+			y += rect.height - height;
+		}
+		n->client->floating_rectangle = (bspwm_rect_t) {x, y, width, height};
+		if (n->client->state == STATE_FLOATING) {
+			window_move_resize(n->id, x, y, width, height);
+			if (!grabbing) {
+				put_status(SBSC_MASK_NODE_GEOMETRY, "node_geometry 0x%08X 0x%08X 0x%08X %ux%u+%i+%i\n",
+				           loc->monitor->id, loc->desktop->id, loc->node->id, width, height, x, y);
+			}
+		} else {
+			arrange(loc->monitor, loc->desktop);
+		}
+	}
 	return true;
 }
 

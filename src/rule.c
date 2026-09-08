@@ -328,8 +328,11 @@ void _apply_window_state(bspwm_wid_t win, rule_consequence_t *csq)
 		xcb_ewmh_get_atoms_reply_wipe(&wm_state);
 	}
 #else
-	(void)win;
-	(void)csq;
+	/* Wayland: a client that asked for fullscreen before it was managed
+	 * (mpv --fs, games) has it recorded on the toplevel. */
+	if (backend_window_requests_fullscreen(win)) {
+		SET_CSQ_STATE(STATE_FULLSCREEN);
+	}
 #endif
 }
 
