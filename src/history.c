@@ -41,6 +41,34 @@ history_t *make_history(monitor_t *m, desktop_t *d, node_t *n)
 	return h;
 }
 
+/*
+ * Focus history is a linked list that only shrinks when a window or desktop
+ * goes away. Alternating focus between two windows appends a fresh entry on
+ * every switch, so a long-lived session grows the list without bound -- both
+ * memory and the O(n) scan history_add() does on every focus change. Cap it
+ * and evict the oldest entries (LRU); losing ancient focus positions is
+ * harmless, and the scan stays bounded.
+ */
+#define HISTORY_MAX 4096
+static unsigned history_count = 0;
+
+static void history_trim(void)
+{
+	while (history_count > HISTORY_MAX &&
+	       history_head != NULL && history_head != history_tail) {
+		history_t *old = history_head;
+		history_head = old->next;
+		if (history_head != NULL) {
+			history_head->prev = NULL;
+		}
+		if (history_needle == old) {
+			history_needle = history_head;
+		}
+		free(old);
+		history_count--;
+	}
+}
+
 void history_add(monitor_t *m, desktop_t *d, node_t *n, bool focused)
 {
 	if (!record_history) {
@@ -58,6 +86,7 @@ void history_add(monitor_t *m, desktop_t *d, node_t *n, bool focused)
 
 	if (history_head == NULL) {
 		history_head = history_tail = h;
+		history_count++;
 	} else if ((n != NULL && history_tail->loc.node != n) || (n == NULL && d != history_tail->loc.desktop)) {
 		history_t *ip = focused ? history_tail : NULL;
 
@@ -84,6 +113,8 @@ void history_add(monitor_t *m, desktop_t *d, node_t *n, bool focused)
 			}
 			history_insert_before(h, ip);
 		}
+		history_count++;
+		history_trim();
 	} else {
 		free(h);
 	}
@@ -146,6 +177,7 @@ void history_remove(desktop_t *d, node_t *n, bool deep)
 						history_needle = (a != NULL ? a : p);
 					}
 					free(c);
+					history_count--;
 					c = p;
 				}
 				a->prev = c;
@@ -164,6 +196,7 @@ void history_remove(desktop_t *d, node_t *n, bool deep)
 				history_needle = (a != NULL ? a : c);
 			}
 			free(b);
+			history_count--;
 			b = c;
 		} else {
 			b = b->prev;
@@ -180,6 +213,7 @@ void empty_history(void)
 		h = next;
 	}
 	history_head = history_tail = NULL;
+	history_count = 0;
 }
 
 node_t *history_last_node(desktop_t *d, node_t *n)
