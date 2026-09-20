@@ -227,6 +227,31 @@ assert_ok "clear keybinds" $BSPC keybind --clear
 KB_EMPTY=$($BSPC keybind --list 2>/dev/null)
 assert_eq "keybinds empty after clear" "" "$KB_EMPTY"
 
+# T16b: keybinds actually FIRE end-to-end (X11 only, needs xdotool).
+# This is the only test that exercises the key-press dispatch path, i.e. the
+# in-process `bspc ...` fast path in keybind_exec and its fork+sh fallback.
+if [ "$BACKEND" = "x11" ] && command -v xdotool >/dev/null 2>&1; then
+	# Fast path: a plain `bspc ...` binding runs in-process (no fork/sh).
+	$BSPC config border_width 1 >/dev/null 2>&1
+	$BSPC keybind --add "super + F12" "bspc config border_width 7" >/dev/null 2>&1
+	xdotool key --clearmodifiers super+F12 >/dev/null 2>&1
+	sleep 0.3
+	BW_FIRED=$($BSPC config border_width 2>/dev/null)
+	assert_eq "in-process bspc keybind fires on keypress" "7" "$BW_FIRED"
+
+	# Fallback path: `&&` forces the fork+sh route; the spawned bspc reaches
+	# us over the socket (children inherit BSPWM_SOCKET).
+	$BSPC keybind --add "super + F11" "bspc config border_width 9 && true" >/dev/null 2>&1
+	xdotool key --clearmodifiers super+F11 >/dev/null 2>&1
+	sleep 0.3
+	BW_FB=$($BSPC config border_width 2>/dev/null)
+	assert_eq "fork+sh fallback keybind fires on keypress" "9" "$BW_FB"
+
+	$BSPC keybind --clear >/dev/null 2>&1
+else
+	printf "%b\n" "  ${YELLOW}SKIP${NC}: keybind firing (needs x11 + xdotool)"
+fi
+
 echo ""
 echo "== Config =="
 

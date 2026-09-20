@@ -32,6 +32,7 @@
 #include <ctype.h>
 #include <xkbcommon/xkbcommon.h>
 #include "helpers.h"
+#include "messages.h"
 #include "keybind.h"
 
 keybind_table_t keybind_table;
@@ -134,9 +135,74 @@ bool keybind_parse_combo(const char *combo, uint32_t *modifiers, uint32_t *keysy
 	return false;
 }
 
+/* Characters that give the string shell semantics we must preserve. If any is
+ * present we take the fork+sh path; otherwise the command is a plain argv we can
+ * run ourselves. Being conservative here only costs a fork on rare bindings. */
+static bool has_shell_meta(const char *s)
+{
+	for (; *s != '\0'; s++) {
+		switch (*s) {
+		case '\'': case '"': case '$': case '`': case '\\':
+		case ';': case '&': case '|': case '<': case '>':
+		case '(': case ')': case '{': case '}':
+		case '[': case ']': case '*': case '?': case '~':
+		case '#': case '\n':
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Fast path for `bspc ...` bindings: instead of fork -> sh -> bspc -> connect to
+ * our own control socket -> reply -> teardown (a few ms per keypress), tokenize
+ * the command and dispatch it in-process, exactly as if bspc had sent it over
+ * the socket. Returns true when handled; false means "fall back to fork+sh".
+ * Safe to call from the event path: nothing there holds a live scratch
+ * allocation, so scratch_reset() here frees only what we allocated. */
+static bool keybind_exec_inproc(const char *command)
+{
+	while (*command == ' ' || *command == '\t') command++;
+
+	/* Must be exactly the `bspc` program, then whitespace. */
+	if (strncmp(command, "bspc", 4) != 0) return false;
+	if (command[4] != ' ' && command[4] != '\t') return false;
+	if (has_shell_meta(command)) return false;
+
+	const char *rest = command + 4;
+	size_t len = strlen(rest);
+	char *buf = scratch_alloc(len + 1);
+	if (buf == NULL) return false;
+	memcpy(buf, rest, len + 1);
+
+	#define KB_MAX_ARGS 64
+	char *argv[KB_MAX_ARGS];
+	int argc = 0;
+	for (char *p = buf; *p != '\0'; ) {
+		while (*p == ' ' || *p == '\t') *p++ = '\0';
+		if (*p == '\0') break;
+		if (argc >= KB_MAX_ARGS) { scratch_reset(); return false; }
+		argv[argc++] = p;
+		while (*p != '\0' && *p != ' ' && *p != '\t') p++;
+	}
+	if (argc < 1) { scratch_reset(); return false; }
+
+	/* `subscribe` would keep the /dev/null stream alive as a dead subscriber. */
+	if (streq(argv[0], "subscribe")) { scratch_reset(); return false; }
+
+	FILE *devnull = fopen("/dev/null", "w");
+	if (devnull == NULL) { scratch_reset(); return false; }
+
+	process_message(argv, argc, devnull); /* consumes (fcloses) devnull */
+	scratch_reset();
+	return true;
+	#undef KB_MAX_ARGS
+}
+
 void keybind_exec(const char *command)
 {
 	if (!command || !*command) return;
+
+	if (keybind_exec_inproc(command)) return;
 
 	pid_t pid = fork();
 	if (pid == 0) {
