@@ -641,12 +641,78 @@ rule 'COMMANDS'
 Commands
 ^^^^^^^^
 
-*-a*, *--add* (<class_name>|\*)[:(<instance_name>|\*)[:(<name>|\*)]] [*-o*|*--one-shot*] [monitor=MONITOR_SEL|desktop=DESKTOP_SEL|node=NODE_SEL] [state=STATE] [layer=LAYER] [honor_size_hints=(true|false|tiled|floating)] [split_dir=DIR] [split_ratio=RATIO] [(hidden|sticky|private|locked|marked|center|follow|manage|focus|border)=(on|off)] [rectangle=WxH+X+Y]::
+*-a*, *--add* [*-o*|*--one-shot*] (<class_name>|\*)[:(<instance_name>|\*)[:(<name>|\*)]]|(<property>[~]=<pattern>[/i])... [*-o*|*--one-shot*] <effect>...::
 	Create a new rule. Colons in the 'instance_name', 'class_name', or 'name'
 	fields can be escaped with a backslash.
 
-*-r*, *--remove* ^<n>|head|tail|(<class_name>|\*)[:(<instance_name>|\*)[:(<name>|*)]]...::
+A rule is given either as the pattern above or as a list of conditions, each one
+'<property>=<pattern>' or '<property>~=<pattern>'. The properties are 'class',
+'instance', 'name' (the title), 'type', 'role' (*WM_WINDOW_ROLE*, always empty under
+the wlroots backend) and 'transient' (*on* when the window is a child of another
+one). A window matches the rule when every condition holds, and a rule with no
+condition at all, only effects, matches every window, the same as '\*:*:*'.
+
+The first argument after the options decides the form. When it starts with a key
+(lowercase letters and underscores) followed by '=' or '~=', the rule is a list of
+conditions and effects, and a key that is neither a property nor an effect is an
+error. Anything else is the pattern above, so a pattern whose title contains an
+'=', such as 'st:*:vim = notes', is still a pattern. Only the first '=' of a
+condition ends the property, which lets the same title be written as a condition
+too: 'name=vim = notes'. The one pattern that cannot be given as such is a lone
+lowercase class containing an '=', such as 'foo=bar', which reads as the unknown key
+'foo': write it as 'class=foo=bar'.
+
+With '=' the pattern is compared as written, and '\*' alone matches anything, as it
+does in the pattern above. With '~=' the pattern is a POSIX extended regular
+expression, where '\*' alone is not valid: use '.*', or leave the condition out.
+
+A pattern ending in '/i' is compared ignoring case, so 'class~=^crx_/i' is both.
+The properties 'type' and 'transient' take neither a regular expression nor the
+'/i' suffix: they are always compared as written. 'type' is one of *normal*,
+*dock*, *desktop*, *notification*, *dialog*, *utility* or *toolbar*, and
+'transient' is a boolean.
+
+A pattern holds at most 255 characters, not counting the '/i' suffix, and the
+effects of a rule, together and separated by spaces, at most 255 as well.
+
+A rule is refused when a pattern is not a valid regular expression, a condition is
+repeated, a 'type' or 'transient' value is not in its list, 'type' or 'transient' is
+given with '~=' or '/i', a key is neither a property nor an effect, a pattern or
+the effects are too long, or the conditions are too long to be listed.
+
+Only rules that look at 'class' and 'instance' carry 'ignore_tile_limits': the other
+properties are not known yet when a window is inserted.
+
+----
+bspc rule -a class=Pavucontrol/i state=floating
+bspc rule -a 'class~=^(eog|feh|ristretto)$' state=floating focus=on
+bspc rule -a class=Google-chrome instance~=^crx_ state=floating center=on
+bspc rule -a type=dialog state=floating center=on
+bspc rule -a class=Google-chrome role=pop-up state=floating
+bspc rule -a transient=on state=floating
+bspc rule -a -o class=kitty state=floating
+bspc rule -a Google-chrome:crx_abcdef desktop=work follow=on
+----
+
+The effects a rule may carry are: 'monitor=MONITOR_SEL', 'desktop=DESKTOP_SEL',
+'node=NODE_SEL', 'state=STATE', 'layer=LAYER',
+'honor_size_hints=(true|false|tiled|floating)', 'split_dir=DIR',
+'split_ratio=RATIO', 'rectangle=WxH+X+Y' and the booleans
+'(hidden|sticky|private|locked|marked|center|follow|manage|focus|border)=(on|off)'.
+
+*-r*, *--remove* ^<n>|head|tail|(<class_name>|\*)[:(<instance_name>|\*)[:(<name>|*)]]|<conditions>...::
 	Remove the given rules.
+
+A pattern removes the rules, in either form, whose class, instance and name
+patterns are the ones it gives, field by field, a '\*' in it standing for any of
+them: '\*:\*:\*' removes every rule. A rule written as conditions can also be
+removed by its conditions exactly as *rule -l* lists them, given as a single
+argument; compared that way, a rule with one more condition, or a different
+operator, is a different rule and stays.
+
+----
+bspc rule -r 'class=Google-chrome instance~=^crx_'
+----
 
 *-l*, *--list*::
 	List the rules.
@@ -676,9 +742,10 @@ the other silently gets nothing. Prefer one or the other per key.
 
 A 'COMBO' is modifiers and a key joined by *+*, e.g. *"super + shift + q"*.
 Accepted modifier names are *super*/*mod4*, *alt*/*mod1*, *ctrl*/*control*,
-*shift*, *mod2*, *mod3* and *mod5*. The key is an XKB keysym name and is
-matched unshifted, so write *"super + shift + q"*, not *"super + Q"*. Num
-Lock, Caps Lock and Scroll Lock are ignored when matching.
+*shift*, *mod3* and *mod5*. The key is an XKB keysym name and is matched
+unshifted, so write *"super + shift + q"*, not *"super + Q"*. Num Lock, Caps
+Lock and Scroll Lock are ignored when matching; *mod2* is conventionally Num
+Lock, so a binding that names it could never fire and is refused.
 
 Options
 ^^^^^^^
