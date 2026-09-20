@@ -106,9 +106,9 @@ bool keybind_parse_combo(const char *combo, uint32_t *modifiers, uint32_t *keysy
 
 	while (token) {
 		/* Trim whitespace */
-		while (*token && isspace(*token)) token++;
+		while (*token && isspace((unsigned char)*token)) token++;
 		char *end = token + strlen(token) - 1;
-		while (end > token && isspace(*end)) *end-- = '\0';
+		while (end > token && isspace((unsigned char)*end)) *end-- = '\0';
 
 		if (*token == '\0') {
 			token = strtok_r(NULL, "+", &saveptr);
@@ -124,6 +124,14 @@ bool keybind_parse_combo(const char *combo, uint32_t *modifiers, uint32_t *keysy
 		}
 
 		token = strtok_r(NULL, "+", &saveptr);
+	}
+
+	/* mod2 is conventionally Num Lock, which the key-press path strips from
+	 * the event modifiers before matching (so a binding requiring it could
+	 * never fire). Reject it rather than register a dead binding. */
+	if (*modifiers & KBMOD_MOD2) {
+		warn("keybind: mod2 (Num Lock) cannot be a binding modifier; ignoring '%s'.\n", combo);
+		return false;
 	}
 
 	/* Last non-modifier token is the keysym */
@@ -228,17 +236,21 @@ bool keybind_load_config(const char *path)
 
 		/* Skip empty lines and comments */
 		char *p = line;
-		while (*p && isspace(*p)) p++;
+		while (*p && isspace((unsigned char)*p)) p++;
 		if (*p == '\0' || *p == '#')
 			continue;
 
 		if (pending_combo[0] != '\0') {
 			/* This line is the command for the previous combo */
-			while (*p && isspace(*p)) p++;
+			while (*p && isspace((unsigned char)*p)) p++;
 
 			uint32_t modifiers, keysym;
 			if (keybind_parse_combo(pending_combo, &modifiers, &keysym)) {
-				keybind_add(modifiers, keysym, p);
+				if (!keybind_add(modifiers, keysym, p))
+					warn("keybind: table full (max %d), dropping '%s'.\n",
+					     MAX_KEYBINDS, pending_combo);
+			} else {
+				warn("keybind: could not parse combo '%s'.\n", pending_combo);
 			}
 			pending_combo[0] = '\0';
 		} else {

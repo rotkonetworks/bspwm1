@@ -446,7 +446,7 @@ bool manage_window(bspwm_wid_t win, rule_consequence_t *csq, int fd)
 	ewmh_set_wm_desktop(n, d);
 
 	if (!csq->hidden && csq->focus) {
-		if (d == mon->desk || csq->follow) {
+		if ((mon != NULL && d == mon->desk) || csq->follow) {
 			focus_node(m, d, n);
 		} else {
 			activate_node(m, d, n);
