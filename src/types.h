@@ -27,6 +27,7 @@
 #include <stdbool.h>
 #include "backend.h"
 #include "helpers.h"
+#include "rule_match.h"
 
 #define MISSING_VALUE        "N/A"
 #define MAX_WM_STATES        4
@@ -387,9 +388,10 @@ struct subscriber_list_t {
 
 typedef struct rule_t rule_t;
 struct rule_t {
-	char class_name[MAXLEN];
-	char instance_name[MAXLEN];
-	char name[MAXLEN];
+	rule_cond_t conds[RULE_PROP_COUNT];
+	/* The conditions as they were written: what `rule -l` prints, and what
+	 * `rule -r` compares a cause written as conditions against. */
+	char cause[3 * MAXLEN];
 	char effect[MAXLEN];
 	bool one_shot;
 	rule_t *prev;

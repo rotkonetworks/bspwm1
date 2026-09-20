@@ -253,6 +253,51 @@ else
 fi
 
 echo ""
+echo "== Rule matching (property=pattern) =="
+
+# New-form rule round-trips through `rule -l`.
+$BSPC rule -a class=RuleTestA state=floating >/dev/null 2>&1 || true
+RL=$($BSPC rule -l 2>/dev/null)
+printf '%s\n' "$RL" | grep -q 'class=RuleTestA' && G=yes || G=no
+assert_eq "new-form rule round-trips in rule -l" "yes" "$G"
+
+# A regex condition (~=) is preserved verbatim.
+$BSPC rule -a 'name~=^RuleRegex.*$' state=floating >/dev/null 2>&1 || true
+RL=$($BSPC rule -l 2>/dev/null)
+printf '%s\n' "$RL" | grep -q 'name~=\^RuleRegex' && G=yes || G=no
+assert_eq "regex rule round-trips in rule -l" "yes" "$G"
+
+# A misspelled key is refused, not silently added.
+assert_fail "unknown condition key is rejected" $BSPC rule -a clas=Typo state=floating
+
+# New-form removal: a rule is removed by the exact text `rule -l` prints.
+$BSPC rule -a class=RmTest state=floating >/dev/null 2>&1 || true
+$BSPC rule -r class=RmTest >/dev/null 2>&1 || true
+RL=$($BSPC rule -l 2>/dev/null)
+printf '%s\n' "$RL" | grep -q 'class=RmTest' && G=yes || G=no
+assert_eq "new-form rule removed by its cause" "no" "$G"
+
+$BSPC rule -r RuleTestA >/dev/null 2>&1 || true
+$BSPC rule -r head >/dev/null 2>&1 || true  # drop the regex rule too
+
+# Real window matched by class gets the consequence applied (x11 only:
+# the test client sets WM_CLASS; the wl client uses app_id differently).
+if [ "$BACKEND" = "x11" ] && [ -f ./test_window ]; then
+	$BSPC rule -a class=RuleFloat state=floating >/dev/null 2>&1 || true
+	FLOAT_BEFORE=$($BSPC query -N -n .floating 2>/dev/null | wc -l)
+	./test_window rulefloat-i RuleFloat &
+	RF_PID=$!
+	sleep 0.6
+	FLOAT_AFTER=$($BSPC query -N -n .floating 2>/dev/null | wc -l)
+	assert_eq "class-matched rule floats the window" "$((FLOAT_BEFORE + 1))" "$FLOAT_AFTER"
+	kill "$RF_PID" 2>/dev/null || true
+	sleep 0.3
+	$BSPC rule -r RuleFloat >/dev/null 2>&1 || true
+else
+	printf "%b\n" "  ${YELLOW}SKIP${NC}: rule window match (needs x11 + test_window)"
+fi
+
+echo ""
 echo "== Config =="
 
 # T17: get border_width
@@ -448,6 +493,24 @@ else
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
 BSPWM_PID=""
+
+# ---- rule_match unit tests (backend-agnostic, no display needed) ----
+echo ""
+echo "== rule_match unit tests =="
+if [ -x ./test_rule_match ]; then
+	if ./test_rule_match > /tmp/bspwm_rule_match_unit.$$ 2>&1; then
+		printf "%b\n" "  ${GREEN}PASS${NC}: rule_match unit suite"
+		PASS=$((PASS + 1))
+	else
+		printf "%b\n" "  ${RED}FAIL${NC}: rule_match unit suite"
+		sed 's/^/    /' /tmp/bspwm_rule_match_unit.$$
+		FAIL=$((FAIL + 1))
+	fi
+	TESTS_RUN=$((TESTS_RUN + 1))
+	rm -f /tmp/bspwm_rule_match_unit.$$
+else
+	printf "%b\n" "  ${YELLOW}SKIP${NC}: rule_match unit suite (not built)"
+fi
 
 # ---- Report ----
 

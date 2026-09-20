@@ -7,7 +7,7 @@ CFLAGS   += -std=c23 -pedantic -Wall -Wextra -Wvla -Wformat=2 -Wformat-overflow=
 
 # Core sources — backend-agnostic
 CORE_SRC = bspwm.c helpers.c geometry.c jsmn.c settings.c monitor.c desktop.c tree.c stack.c history.c \
-	 messages.c parse.c query.c restore.c rule.c subscribe.c keybind.c snap.c
+	 messages.c parse.c query.c restore.c rule.c rule_match.c subscribe.c keybind.c snap.c
 
 # Backend selection. Each backend is a separate build with its own binary
 # name, object directory and session file: the X11 build is `bspwm`, the

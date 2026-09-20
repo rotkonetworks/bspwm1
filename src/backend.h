@@ -242,6 +242,8 @@ bool backend_get_window_class(bspwm_wid_t win, char *class_name, char *instance_
 
 /* Get window title / _NET_WM_NAME. */
 bool backend_get_window_name(bspwm_wid_t win, char *name, size_t len);
+/* WM_WINDOW_ROLE (X11 only; empty on Wayland). Returns false when unset. */
+bool backend_get_window_role(bspwm_wid_t win, char *role, size_t len);
 
 /* Get ICCCM hints (take_focus, input_hint, delete_window). */
 bool backend_get_icccm_props(bspwm_wid_t win, bspwm_icccm_props_t *props);

@@ -1253,57 +1253,308 @@ void cmd_rule(char **args, int num, FILE *rsp)
 
 	while (num > 0) {
 		if (streq("-a", *args) || streq("--add", *args)) {
+			const char *command = *args;
 			num--, args++;
+			/* The options may come before the rule itself, and in the
+			 * new form, which has no positional pattern, that is where
+			 * they are naturally written. Read them before the form is
+			 * decided, or `-o` would be taken for an old-form pattern. */
+			bool one_shot = false;
+			while (num > 0 && (streq("-o", *args) || streq("--one-shot", *args))) {
+				one_shot = true;
+				num--, args++;
+			}
 			if (num < 2) {
-				fail(rsp, "rule %s: Not enough arguments.\n", *(args - 1));
+				fail(rsp, "rule %s: Not enough arguments.\n", command);
 				return;
 			}
 			rule_t *rule = make_rule();
+			rule->one_shot = one_shot;
 
-			struct tokenize_state state;
-			char *class_name = tokenize_with_escape(&state, args[0], COL_TOK[0]);
-			char *instance_name = tokenize_with_escape(&state, NULL, COL_TOK[0]);
-			char *name = tokenize_with_escape(&state, NULL, COL_TOK[0]);
-			if (!class_name || !instance_name || !name) {
-				free(rule);
+			/* The new form is a list of `property=pattern` conditions
+			 * mixed with the consequences, the old one a single
+			 * CLASS[:INSTANCE[:NAME]] pattern. What tells them apart is
+			 * the key: a `key=` or `key~=` opens the new form, anything
+			 * else is a pattern. Not the mere presence of an `=` — the
+			 * old form's last field is the window title, and a title may
+			 * well contain one. */
+			bool new_form = rule_is_key_value(args[0]);
+
+			if (!new_form) {
+				struct tokenize_state state;
+				char *class_name = tokenize_with_escape(&state, args[0], COL_TOK[0]);
+				char *instance_name = tokenize_with_escape(&state, NULL, COL_TOK[0]);
+				char *name = tokenize_with_escape(&state, NULL, COL_TOK[0]);
+				if (!class_name || !instance_name || !name) {
+					free(rule);
+					free(class_name);
+					free(instance_name);
+					free(name);
+					return;
+				}
+
+				char err[MAXLEN];
+				const char *fields[3] = {class_name, instance_name, name};
+				const rule_prop_t props[3] = {RULE_PROP_CLASS, RULE_PROP_INSTANCE, RULE_PROP_NAME};
+				bool ok = true;
+				for (int f = 0; f < 3 && ok; f++) {
+					/* Only the instance and the name fall back to "*" when
+					 * empty. The class is mandatory, so an empty one only
+					 * happens through an explicit "::x"; it stays a literal
+					 * empty condition, which never matches, same as before
+					 * this module existed. */
+					const char *value = fields[f];
+					if (props[f] != RULE_PROP_CLASS && value[0] == '\0') {
+						value = MATCH_ANY;
+					}
+					if (streq(value, MATCH_ANY)) {
+						continue;
+					}
+					/* 0: the old syntax is exact and case-sensitive, with
+					 * no `~` or `/i` operator to read from the value. */
+					if (!rule_cond_compile(&rule->conds[props[f]], props[f], value, 0, err, sizeof(err))) {
+						fail(rsp, "rule: %s: %s\n", rule_prop_name(props[f]), err);
+						ok = false;
+					}
+				}
+				snprintf(rule->cause, sizeof(rule->cause), "%s:%s:%s",
+				         class_name,
+				         instance_name[0] == '\0' ? MATCH_ANY : instance_name,
+				         name[0] == '\0' ? MATCH_ANY : name);
 				free(class_name);
 				free(instance_name);
 				free(name);
-				return;
-			}
-
-			snprintf(rule->class_name, sizeof(rule->class_name), "%s", class_name);
-			rule->class_name[sizeof(rule->class_name) - 1] = '\0';
-			snprintf(rule->instance_name, sizeof(rule->instance_name), "%s",
-					 instance_name[0] == '\0' ? MATCH_ANY : instance_name);
-			rule->instance_name[sizeof(rule->instance_name) - 1] = '\0';
-			snprintf(rule->name, sizeof(rule->name), "%s",
-					 name[0] == '\0' ? MATCH_ANY : name);
-			rule->name[sizeof(rule->name) - 1] = '\0';
-			free(class_name);
-			free(instance_name);
-			free(name);
-
-			num--, args++;
-			size_t i = 0;
-			while (num > 0) {
-				if (streq("-o", *args) || streq("--one-shot", *args)) {
-					rule->one_shot = true;
-				} else {
-					for (size_t j = 0; i < sizeof(rule->effect) - 1 && j < strlen(*args); i++, j++) {
-						rule->effect[i] = (*args)[j];
-					}
-					if (num > 1 && i < sizeof(rule->effect)) {
-						rule->effect[i++] = ' ';
-					}
+				if (!ok) {
+					remove_rule(rule);   /* frees the conditions compiled so far */
+					return;
 				}
+
 				num--, args++;
+				size_t i = 0;
+				bool effect_ok = true;
+				while (num > 0 && effect_ok) {
+					if (streq("-o", *args) || streq("--one-shot", *args)) {
+						rule->one_shot = true;
+					} else {
+						/* Validate the consequence key too, so a typo like
+						 * `staet=floating` fails loudly instead of being
+						 * silently dropped by parse_key_value(). */
+						char *sep = strchr(*args, '=');
+						size_t key_len = sep != NULL ? (size_t) (sep - *args) : strlen(*args);
+						char key[MAXLEN];
+						if (key_len >= sizeof(key)) {
+							key_len = sizeof(key) - 1;
+						}
+						memcpy(key, *args, key_len);
+						key[key_len] = '\0';
+						if (!rule_is_consequence_key(key)) {
+							fail(rsp, "rule: Unknown key: '%s'.\n", key);
+							effect_ok = false;
+							break;
+						}
+						/* The old form has no `~=` operator at all, but a
+						 * value ending in `/i` would still be silently
+						 * dropped by parse_key_value(), leaving an inert
+						 * rule the same way an unmarked consequence in the
+						 * new form would. */
+						if (sep != NULL) {
+							const char *value = sep + 1;
+							size_t vlen = strlen(value);
+							if (vlen >= 2 && streq(value + vlen - 2, "/i")) {
+								fail(rsp, "rule: %s: A consequence can't take a case marker.\n", key);
+								effect_ok = false;
+								break;
+							}
+						}
+						/* Refuse what does not fit instead of cutting it
+						 * short: a truncated effect is a rule that does less
+						 * than it was asked to, and says nothing about it. */
+						if (i + strlen(*args) >= sizeof(rule->effect)) {
+							fail(rsp, "rule: %s: The consequences are longer than %zu characters.\n",
+							     key, sizeof(rule->effect) - 1);
+							effect_ok = false;
+							break;
+						}
+						for (size_t j = 0; i < sizeof(rule->effect) - 1 && j < strlen(*args); i++, j++) {
+							rule->effect[i] = (*args)[j];
+						}
+						if (num > 1 && i < sizeof(rule->effect)) {
+							rule->effect[i++] = ' ';
+						}
+					}
+					num--, args++;
+				}
+				if (!effect_ok) {
+					remove_rule(rule);
+					return;
+				}
+				if (i >= sizeof(rule->effect)) {
+					i = sizeof(rule->effect) - 1;
+				}
+				/* The space added after a consequence anticipates another
+				 * one; drop it when nothing followed (a trailing -o). */
+				if (i > 0 && rule->effect[i - 1] == ' ') {
+					i--;
+				}
+				rule->effect[i] = '\0';
+				add_rule(rule);
+			} else {
+				size_t i = 0;
+				bool ok = true;
+				while (num > 0 && ok) {
+					if (streq("-o", *args) || streq("--one-shot", *args)) {
+						rule->one_shot = true;
+						num--, args++;
+						continue;
+					}
+					char *sep = strchr(*args, '=');
+					if (sep == NULL) {
+						fail(rsp, "rule: Not a key=value argument: '%s'.\n", *args);
+						ok = false;
+						break;
+					}
+					/* A `~` right before the `=` marks a regular
+					 * expression; it belongs to the operator, not to the
+					 * key, and never reaches rule_cond_compile(). */
+					bool is_regex = (sep > *args && sep[-1] == '~');
+					size_t key_len = (size_t) (sep - *args) - (is_regex ? 1 : 0);
+					char key[MAXLEN];
+					if (key_len >= sizeof(key)) {
+						fail(rsp, "rule: Key too long: '%s'.\n", *args);
+						ok = false;
+						break;
+					}
+					memcpy(key, *args, key_len);
+					key[key_len] = '\0';
+					const char *value = sep + 1;
+
+					rule_prop_t prop;
+					if (rule_prop_from_key(key, &prop)) {
+						if (rule->conds[prop].used) {
+							fail(rsp, "rule: Repeated condition: '%s'.\n", key);
+							ok = false;
+							break;
+						}
+						/* A trailing `/i` on the value marks
+						 * case-insensitivity; it is not part of the
+						 * pattern itself, and has to come off *before* the
+						 * length is judged: measuring the value with the
+						 * suffix still attached would refuse a legitimate
+						 * 254- or 255-character pattern for being "256 or
+						 * 257 characters long" once /i is counted in. */
+						size_t vlen = strlen(value);
+						bool ignore_case = (vlen >= 2 && streq(value + vlen - 2, "/i"));
+						size_t plen = ignore_case ? vlen - 2 : vlen;
+
+						char pattern[RULE_PATTERN_MAXLEN];
+						const char *to_compile = value;
+						if (plen < sizeof(pattern)) {
+							/* Fits once /i is stripped: this is the actual
+							 * pattern that gets compiled. */
+							snprintf(pattern, sizeof(pattern), "%.*s", (int) plen, value);
+							to_compile = pattern;
+						}
+						/* Otherwise even the stripped value would not fit
+						 * `pattern`. Rather than measuring it here too —
+						 * and repeating rule_cond_compile()'s own "too
+						 * long" message — pass `value` through as it is
+						 * (still however long it really is, /i and all)
+						 * and let rule_cond_compile() reject it and report
+						 * the length itself; one place says it, not two. */
+						unsigned int flags = (is_regex ? RULE_COND_REGEX : 0) |
+						                      (ignore_case ? RULE_COND_ICASE : 0);
+						char err[MAXLEN];
+						if (!rule_cond_compile(&rule->conds[prop], prop, to_compile, flags, err, sizeof(err))) {
+							fail(rsp, "rule: %s: %s\n", key, err);
+							ok = false;
+							break;
+						}
+						/* Keep the condition, in order, exactly as
+						 * `rule -l` will print it. Sized for the worst
+						 * case: an 8-char property name ("instance"), the
+						 * `~` and `=` operator, a 255-char pattern and the
+						 * `/i` suffix — 267 characters. */
+						char printed[RULE_PATTERN_MAXLEN + 32];
+						rule_cond_print(&rule->conds[prop], prop, printed, sizeof(printed));
+						size_t used = strlen(rule->cause);
+						size_t sep_len = used > 0 ? 1 : 0;
+						if (used + sep_len + strlen(printed) >= sizeof(rule->cause)) {
+							/* It would not fit: fail the rule instead of
+							 * silently listing it as something shorter
+							 * than what was actually compiled. */
+							fail(rsp, "rule: %s: The rule has too many conditions to list.\n", key);
+							ok = false;
+							break;
+						}
+						/* The length check just above already guarantees
+						 * this fits; GCC cannot follow it through the
+						 * runtime offset `used` and, with `printed` wider
+						 * than before, starts flagging this snprintf as a
+						 * truncation risk (the same false positive
+						 * rule_match.c documents around its own bounded
+						 * snprintf calls). */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+						snprintf(rule->cause + used, sizeof(rule->cause) - used,
+						         "%s%s", used > 0 ? " " : "", printed);
+#pragma GCC diagnostic pop
+					} else if (rule_is_consequence_key(key)) {
+						/* Consequences take neither operator: they are
+						 * always exact and case-sensitive, the way
+						 * parse_key_value() (src/rule.c) reads them. */
+						size_t vlen = strlen(value);
+						bool value_has_icase_marker = (vlen >= 2 && streq(value + vlen - 2, "/i"));
+						if (is_regex || value_has_icase_marker) {
+							fail(rsp, "rule: %s: Not a condition, can't take an operator or a case marker.\n", key);
+							ok = false;
+							break;
+						}
+						/* Same as the old form: refuse what does not fit,
+						 * the way the conditions above are refused when
+						 * they do not fit the listing. */
+						if (i + strlen(*args) >= sizeof(rule->effect)) {
+							fail(rsp, "rule: %s: The consequences are longer than %zu characters.\n",
+							     key, sizeof(rule->effect) - 1);
+							ok = false;
+							break;
+						}
+						for (size_t j = 0; i < sizeof(rule->effect) - 1 && j < strlen(*args); i++, j++) {
+							rule->effect[i] = (*args)[j];
+						}
+						if (num > 1 && i < sizeof(rule->effect)) {
+							rule->effect[i++] = ' ';
+						}
+					} else {
+						/* Neither a condition nor a consequence: blame the
+						 * key itself, even if it was written with `~=` —
+						 * that is a typo, not a misused operator. */
+						fail(rsp, "rule: Unknown key: '%s'.\n", key);
+						ok = false;
+						break;
+					}
+					num--, args++;
+				}
+				if (i >= sizeof(rule->effect)) {
+					i = sizeof(rule->effect) - 1;
+				}
+				/* Same as the old form: drop the space anticipating a
+				 * consequence that never came (a condition, or nothing,
+				 * followed the last one instead). */
+				if (i > 0 && rule->effect[i - 1] == ' ') {
+					i--;
+				}
+				rule->effect[i] = '\0';
+				if (!ok) {
+					remove_rule(rule);
+					return;
+				}
+				if (rule->cause[0] == '\0') {
+					/* No condition at all: matches everything, just like a
+					 * fully wildcarded old-form pattern. */
+					snprintf(rule->cause, sizeof(rule->cause), "%s", "*:*:*");
+				}
+				add_rule(rule);
 			}
-			if (i >= sizeof(rule->effect)) {
-				i = sizeof(rule->effect) - 1;
-			}
-			rule->effect[i] = '\0';
-			add_rule(rule);
 		} else if (streq("-r", *args) || streq("--remove", *args)) {
 			num--, args++;
 			if (num < 1) {

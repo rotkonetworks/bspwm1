@@ -8,6 +8,7 @@ tests/test_window
 tests/test_window_wl
 tests/test_stacking_borders
 tests/test_stress
+tests/test_rule_match
 
 # Arch packaging build artifacts (makepkg output)
 pkg/arch/bspwm1/

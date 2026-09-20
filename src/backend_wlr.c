@@ -3045,6 +3045,16 @@ bool backend_get_window_name(bspwm_wid_t win, char *name, size_t len)
 	return title != NULL;
 }
 
+bool backend_get_window_role(bspwm_wid_t win, char *role, size_t len)
+{
+	/* No WM_WINDOW_ROLE equivalent on Wayland; wlroots clients don't set it. */
+	(void) win;
+	if (role != NULL && len > 0) {
+		role[0] = '\0';
+	}
+	return false;
+}
+
 bool backend_get_icccm_props(bspwm_wid_t win, bspwm_icccm_props_t *props)
 {
 	(void)win;

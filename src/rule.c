@@ -46,7 +46,7 @@ rule_t *make_rule(void)
 	if (r == NULL) {
 		return NULL;
 	}
-	r->class_name[0] = r->instance_name[0] = r->name[0] = r->effect[0] = '\0';
+	r->cause[0] = r->effect[0] = '\0';
 	r->next = r->prev = NULL;
 	r->one_shot = false;
 	return r;
@@ -82,12 +82,32 @@ void remove_rule(rule_t *r)
 	if (r == rule_tail) {
 		rule_tail = prev;
 	}
+	for (int i = 0; i < RULE_PROP_COUNT; i++) {
+		rule_cond_free(&r->conds[i]);
+	}
 	free(r);
 }
 
 void remove_rule_by_cause(char *cause)
 {
     if (cause == NULL || strlen(cause) >= MAXLEN * 3) {
+        return;
+    }
+
+    /* A rule written as conditions has no CLASS:INSTANCE:NAME to take
+     * apart: it is removed by the very text `rule -l` prints for it,
+     * compared whole, so a rule with one more condition or a different
+     * operator is a different rule and stays. `*:*:*` is not written as
+     * conditions and still goes the old way below, removing every rule. */
+    if (rule_is_key_value(cause)) {
+        rule_t *r = rule_head;
+        while (r != NULL) {
+            rule_t *next = r->next;
+            if (streq(r->cause, cause)) {
+                remove_rule(r);
+            }
+            r = next;
+        }
         return;
     }
 
@@ -119,9 +139,9 @@ void remove_rule_by_cause(char *cause)
 
     while (r != NULL) {
 	    rule_t *next = r->next;
-	    if ((class_name != NULL && (streq(class_name, MATCH_ANY) || streq(r->class_name, class_name))) &&
-			    (instance_name == NULL || streq(instance_name, MATCH_ANY) || streq(r->instance_name, instance_name)) &&
-			    (name == NULL || streq(name, MATCH_ANY) || streq(r->name, name))) {
+	    if ((streq(class_name, MATCH_ANY) || streq(rule_cond_pattern(&r->conds[RULE_PROP_CLASS]), class_name)) &&
+	        (streq(instance_name, MATCH_ANY) || streq(rule_cond_pattern(&r->conds[RULE_PROP_INSTANCE]), instance_name)) &&
+	        (streq(name, MATCH_ANY) || streq(rule_cond_pattern(&r->conds[RULE_PROP_NAME]), name))) {
 		    remove_rule(r);
 	    }
 	    r = next;
@@ -280,12 +300,8 @@ event_queue_t *make_event_queue(void *evt)
 		*(csq->layer) = (val); \
 	} while (0)
 
-void _apply_window_type(bspwm_wid_t win, rule_consequence_t *csq)
+void _apply_window_type(bspwm_wid_t win, bspwm_window_type_t type, rule_consequence_t *csq)
 {
-	bspwm_window_type_t type;
-	if (!backend_get_window_type(win, &type))
-		return;
-
 	switch (type) {
 		case BSP_WINDOW_TYPE_TOOLBAR:
 		case BSP_WINDOW_TYPE_UTILITY:
@@ -336,10 +352,9 @@ void _apply_window_state(bspwm_wid_t win, rule_consequence_t *csq)
 #endif
 }
 
-void _apply_transient(bspwm_wid_t win, rule_consequence_t *csq)
+void _apply_transient(bspwm_wid_t transient_for, rule_consequence_t *csq)
 {
-	bspwm_wid_t transient_for = BSPWM_WID_NONE;
-	if (backend_get_transient_for(win, &transient_for) && transient_for != BSPWM_WID_NONE) {
+	if (transient_for != BSPWM_WID_NONE) {
 		SET_CSQ_STATE(STATE_FLOATING);
 	}
 }
@@ -396,22 +411,90 @@ void parse_keys_values(char *buf, rule_consequence_t *csq)
 }
 
 
+/* Everything a rule can match against, read once per window. */
+typedef struct {
+	char class_name[MAXLEN];
+	char instance_name[MAXLEN];
+	char name[MAXLEN];
+	char role[MAXLEN];
+	const char *type;
+	const char *transient;
+} window_props_t;
+
+static const char *window_type_name(bspwm_window_type_t type)
+{
+	switch (type) {
+		case BSP_WINDOW_TYPE_DOCK: return "dock";
+		case BSP_WINDOW_TYPE_DESKTOP: return "desktop";
+		case BSP_WINDOW_TYPE_NOTIFICATION: return "notification";
+		case BSP_WINDOW_TYPE_DIALOG: return "dialog";
+		case BSP_WINDOW_TYPE_UTILITY: return "utility";
+		case BSP_WINDOW_TYPE_TOOLBAR: return "toolbar";
+		default: return "normal";
+	}
+}
+
+/* Whether any rule has a condition on the role. Reading WM_WINDOW_ROLE is a
+ * round-trip to the server for every window managed, which is only worth
+ * paying when some rule is going to look at the answer. The list is short,
+ * and walking it keeps no count that a rule freed without ever being added
+ * (cmd_rule()'s error paths) could throw off. */
+static bool rules_need_role(void)
+{
+	for (rule_t *r = rule_head; r != NULL; r = r->next) {
+		if (r->conds[RULE_PROP_ROLE].used) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Fill `props` from what the rules already read, plus the role when a rule
+ * needs it; otherwise the role is left empty, which no rule is looking at. */
+static void collect_window_props(bspwm_wid_t win, rule_consequence_t *csq,
+                                 bspwm_window_type_t type, bspwm_wid_t transient_for,
+                                 window_props_t *props)
+{
+	snprintf(props->class_name, sizeof(props->class_name), "%s", csq->class_name);
+	snprintf(props->instance_name, sizeof(props->instance_name), "%s", csq->instance_name);
+	snprintf(props->name, sizeof(props->name), "%s", csq->name);
+	props->role[0] = '\0';
+	if (rules_need_role()) {
+		backend_get_window_role(win, props->role, sizeof(props->role));
+	}
+	props->type = window_type_name(type);
+	props->transient = (transient_for != BSPWM_WID_NONE) ? "on" : "off";
+}
+
 void apply_rules(bspwm_wid_t win, rule_consequence_t *csq)
 {
 	/* Query window properties via backend */
-	_apply_window_type(win, csq);
+	bspwm_window_type_t type = BSP_WINDOW_TYPE_NORMAL;
+	if (!backend_get_window_type(win, &type)) {
+		type = BSP_WINDOW_TYPE_NORMAL;
+	}
+	bspwm_wid_t transient_for = BSPWM_WID_NONE;
+	backend_get_transient_for(win, &transient_for);
+
+	_apply_window_type(win, type, csq);
 	_apply_window_state(win, csq);
-	_apply_transient(win, csq);
+	_apply_transient(transient_for, csq);
 	_apply_hints(win, csq);
 	_apply_class(win, csq);
 	_apply_name(win, csq);
 
+	window_props_t props;
+	collect_window_props(win, csq, type, transient_for, &props);
+
+	const char *values[RULE_PROP_COUNT] = {
+		props.class_name, props.instance_name, props.name,
+		props.type, props.role, props.transient,
+	};
+
 	rule_t *rule = rule_head;
 	while (rule != NULL) {
 		rule_t *next = rule->next;
-		if ((streq(rule->class_name, MATCH_ANY) || streq(rule->class_name, csq->class_name)) &&
-		    (streq(rule->instance_name, MATCH_ANY) || streq(rule->instance_name, csq->instance_name)) &&
-		    (streq(rule->name, MATCH_ANY) || streq(rule->name, csq->name))) {
+		if (rule_conds_match(rule->conds, values)) {
 			char effect[MAXLEN];
 			snprintf(effect, sizeof(effect), "%s", rule->effect);
 			parse_keys_values(effect, csq);
@@ -481,65 +564,187 @@ void parse_rule_consequence(int fd, rule_consequence_t *csq)
     }
 }
 
+/* One setter per consequence key. They are what `parse_key_value()` below
+ * dispatches to, and they are named once, in `consequence_keys`. */
+static void csq_set_monitor(char *value, rule_consequence_t *csq)
+{
+	snprintf(csq->monitor_desc, sizeof(csq->monitor_desc), "%s", value);
+}
+
+static void csq_set_desktop(char *value, rule_consequence_t *csq)
+{
+	snprintf(csq->desktop_desc, sizeof(csq->desktop_desc), "%s", value);
+}
+
+static void csq_set_node(char *value, rule_consequence_t *csq)
+{
+	snprintf(csq->node_desc, sizeof(csq->node_desc), "%s", value);
+}
+
+static void csq_set_split_dir(char *value, rule_consequence_t *csq)
+{
+	direction_t dir;
+	if (parse_direction(value, &dir)) {
+		SET_CSQ_SPLIT_DIR(dir);
+	}
+}
+
+static void csq_set_state(char *value, rule_consequence_t *csq)
+{
+	client_state_t cst;
+	if (parse_client_state(value, &cst)) {
+		SET_CSQ_STATE(cst);
+	}
+}
+
+static void csq_set_layer(char *value, rule_consequence_t *csq)
+{
+	stack_layer_t lyr;
+	if (parse_stack_layer(value, &lyr)) {
+		SET_CSQ_LAYER(lyr);
+	}
+}
+
+static void csq_set_split_ratio(char *value, rule_consequence_t *csq)
+{
+	double rat;
+	if (sscanf(value, "%lf", &rat) == 1 && rat > 0 && rat < 1) {
+		csq->split_ratio = rat;
+	}
+}
+
+static void csq_set_rectangle(char *value, rule_consequence_t *csq)
+{
+	if (csq->rect == NULL) {
+		csq->rect = calloc(1, sizeof(bspwm_rect_t));
+	}
+	if (!parse_rectangle(value, csq->rect)) {
+		free(csq->rect);
+		csq->rect = NULL;
+	}
+}
+
+static void csq_set_honor_size_hints(char *value, rule_consequence_t *csq)
+{
+	if (!parse_honor_size_hints_mode(value, &csq->honor_size_hints)) {
+		csq->honor_size_hints = HONOR_SIZE_HINTS_DEFAULT;
+	}
+}
+
+/* The boolean consequences all read the same way: a value that is not a
+ * boolean leaves the flag alone. */
+#define CSQ_SET_BOOL(name) \
+	static void csq_set_##name(char *value, rule_consequence_t *csq) \
+	{ \
+		bool v; \
+		if (parse_bool(value, &v)) { \
+			csq->name = v; \
+		} \
+	}
+CSQ_SET_BOOL(hidden)
+CSQ_SET_BOOL(sticky)
+CSQ_SET_BOOL(private)
+CSQ_SET_BOOL(locked)
+CSQ_SET_BOOL(marked)
+CSQ_SET_BOOL(center)
+CSQ_SET_BOOL(follow)
+CSQ_SET_BOOL(manage)
+CSQ_SET_BOOL(focus)
+CSQ_SET_BOOL(border)
+#undef CSQ_SET_BOOL
+
+/* Every key a rule consequence takes, and nothing else. This is the only
+ * place they are enumerated: `parse_key_value()` dispatches through it, and
+ * `cmd_rule()` (src/messages.c) asks rule_is_consequence_key() whether an
+ * argument is one before accepting the rule. A key cmd_rule() does not know
+ * is an error, so a second list kept by hand beside this one would start
+ * refusing legitimate rules the moment the two drifted apart.
+ * `ignore_tile_limits` has no setter on purpose: nothing reads it off the
+ * consequence — `effect_has()` (src/tree.c) reads it straight out of the
+ * rule's effect text — but it is still a key a rule may carry. */
+static const struct {
+	const char *key;
+	void (*set)(char *value, rule_consequence_t *csq);
+} consequence_keys[] = {
+	{"monitor", csq_set_monitor},
+	{"desktop", csq_set_desktop},
+	{"node", csq_set_node},
+	{"split_dir", csq_set_split_dir},
+	{"split_ratio", csq_set_split_ratio},
+	{"state", csq_set_state},
+	{"layer", csq_set_layer},
+	{"honor_size_hints", csq_set_honor_size_hints},
+	{"rectangle", csq_set_rectangle},
+	{"hidden", csq_set_hidden},
+	{"sticky", csq_set_sticky},
+	{"private", csq_set_private},
+	{"locked", csq_set_locked},
+	{"marked", csq_set_marked},
+	{"center", csq_set_center},
+	{"follow", csq_set_follow},
+	{"manage", csq_set_manage},
+	{"focus", csq_set_focus},
+	{"border", csq_set_border},
+	{"ignore_tile_limits", NULL},
+};
+
+/* Whether `arg` opens the `property=pattern` form of a rule: a key written
+ * right before an `=` or a `~=`. The two forms are told apart by the shape
+ * of that key — lowercase letters and underscores, which is every key bspwm
+ * has — and not by the mere presence of an `=`, because the old
+ * CLASS[:INSTANCE[:NAME]] form ends in the window title, which is free text
+ * and may well carry one of its own ("st:*:vim = notes"). Judging the shape
+ * rather than asking whether the key is a key bspwm knows is what keeps a
+ * misspelled condition ("clas=kitty") an error instead of turning it into a
+ * class pattern that could never match anything. Only the first `=` is
+ * read, so everything after it stays part of the value. */
+bool rule_is_key_value(const char *arg)
+{
+	if (arg == NULL) {
+		return false;
+	}
+	const char *sep = strchr(arg, '=');
+	if (sep == NULL) {
+		return false;
+	}
+	size_t key_len = (size_t) (sep - arg);
+	/* A `~` right before the `=` belongs to the operator, not to the key. */
+	if (key_len > 0 && sep[-1] == '~') {
+		key_len--;
+	}
+	if (key_len == 0) {
+		return false;
+	}
+	for (size_t i = 0; i < key_len; i++) {
+		if ((arg[i] < 'a' || arg[i] > 'z') && arg[i] != '_') {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool rule_is_consequence_key(const char *key)
+{
+	if (key == NULL) {
+		return false;
+	}
+	for (size_t i = 0; i < LENGTH(consequence_keys); i++) {
+		if (streq(consequence_keys[i].key, key)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void parse_key_value(char *key, char *value, rule_consequence_t *csq)
 {
-	bool v;
-	if (streq("monitor", key)) {
-		snprintf(csq->monitor_desc, sizeof(csq->monitor_desc), "%s", value);
-	} else if (streq("desktop", key)) {
-		snprintf(csq->desktop_desc, sizeof(csq->desktop_desc), "%s", value);
-	} else if (streq("node", key)) {
-		snprintf(csq->node_desc, sizeof(csq->node_desc), "%s", value);
-	} else if (streq("split_dir", key)) {
-		direction_t dir;
-		if (parse_direction(value, &dir)) {
-			SET_CSQ_SPLIT_DIR(dir);
+	for (size_t i = 0; i < LENGTH(consequence_keys); i++) {
+		if (streq(consequence_keys[i].key, key)) {
+			if (consequence_keys[i].set != NULL) {
+				consequence_keys[i].set(value, csq);
+			}
+			return;
 		}
-	} else if (streq("state", key)) {
-		client_state_t cst;
-		if (parse_client_state(value, &cst)) {
-			SET_CSQ_STATE(cst);
-		}
-	} else if (streq("layer", key)) {
-		stack_layer_t lyr;
-		if (parse_stack_layer(value, &lyr)) {
-			SET_CSQ_LAYER(lyr);
-		}
-	} else if (streq("split_ratio", key)) {
-		double rat;
-		if (sscanf(value, "%lf", &rat) == 1 && rat > 0 && rat < 1) {
-			csq->split_ratio = rat;
-		}
-	} else if (streq("rectangle", key)) {
-		if (csq->rect == NULL) {
-			csq->rect = calloc(1, sizeof(bspwm_rect_t));
-		}
-		if (!parse_rectangle(value, csq->rect)) {
-			free(csq->rect);
-			csq->rect = NULL;
-		}
-	} else if (streq("honor_size_hints", key)) {
-		if (!parse_honor_size_hints_mode(value, &csq->honor_size_hints)) {
-			csq->honor_size_hints = HONOR_SIZE_HINTS_DEFAULT;
-		}
-	} else if (parse_bool(value, &v)) {
-		if (streq("hidden", key)) {
-			csq->hidden = v;
-		}
-#define SETCSQ(name) \
-		else if (streq(#name, key)) { \
-			csq->name = v; \
-		}
-		SETCSQ(sticky)
-		SETCSQ(private)
-		SETCSQ(locked)
-		SETCSQ(marked)
-		SETCSQ(center)
-		SETCSQ(follow)
-		SETCSQ(manage)
-		SETCSQ(focus)
-		SETCSQ(border)
-#undef SETCSQ
 	}
 }
 
@@ -549,6 +754,6 @@ void parse_key_value(char *key, char *value, rule_consequence_t *csq)
 void list_rules(FILE *rsp)
 {
 	for (rule_t *r = rule_head; r != NULL; r = r->next) {
-		fprintf(rsp, "%s:%s:%s %c> %s\n", r->class_name, r->instance_name, r->name, r->one_shot?'-':'=', r->effect);
+		fprintf(rsp, "%s %c> %s\n", r->cause, r->one_shot?'-':'=', r->effect);
 	}
 }

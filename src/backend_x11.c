@@ -63,6 +63,7 @@ xcb_ewmh_connection_t *ewmh;
 xcb_atom_t WM_STATE;
 xcb_atom_t WM_TAKE_FOCUS;
 xcb_atom_t WM_DELETE_WINDOW;
+xcb_atom_t WM_WINDOW_ROLE;
 
 uint8_t randr_base;
 
@@ -331,6 +332,34 @@ bool backend_get_window_name(bspwm_wid_t win, char *name, size_t len)
 	name[safe_len] = '\0';
 	xcb_icccm_get_text_property_reply_wipe(&reply);
 	return true;
+}
+
+bool backend_get_window_role(bspwm_wid_t win, char *role, size_t len)
+{
+	if (role == NULL || len == 0) {
+		return false;
+	}
+	role[0] = '\0';
+	/* Interned once, in x11_setup_atoms(), like the other WM_* atoms. */
+	if (WM_WINDOW_ROLE == XCB_ATOM_NONE) {
+		return false;
+	}
+	/* long_length counts 32-bit units, not bytes: ask for just enough of
+	 * them to fill `role`. */
+	xcb_get_property_reply_t *reply = xcb_get_property_reply(dpy,
+		xcb_get_property(dpy, 0, win, WM_WINDOW_ROLE, XCB_ATOM_STRING, 0,
+		                 (uint32_t) ((len + 3) / 4)), NULL);
+	if (reply == NULL) {
+		return false;
+	}
+	int value_len = xcb_get_property_value_length(reply);
+	if (value_len > 0) {
+		size_t safe_len = (size_t) value_len < len - 1 ? (size_t) value_len : len - 1;
+		memcpy(role, xcb_get_property_value(reply), safe_len);
+		role[safe_len] = '\0';
+	}
+	free(reply);
+	return role[0] != '\0';
 }
 
 bool backend_get_icccm_props(bspwm_wid_t win, bspwm_icccm_props_t *props)
@@ -751,6 +780,7 @@ void x11_setup_atoms(void)
 	get_atom("WM_STATE", &WM_STATE);
 	get_atom("WM_DELETE_WINDOW", &WM_DELETE_WINDOW);
 	get_atom("WM_TAKE_FOCUS", &WM_TAKE_FOCUS);
+	get_atom("WM_WINDOW_ROLE", &WM_WINDOW_ROLE);
 }
 
 void x11_setup_randr(void)

@@ -383,17 +383,19 @@ static bool node_ignores_tile_limits(node_t *n)
 	const char *instance_name = n->client->instance_name;
 
 	for (rule_t *r = rule_head; r != NULL; r = r->next) {
-		/* Match all three fields the way apply_rules does. Testing the class
-		 * alone meant any rule with a wildcard class carrying this effect
-		 * silently switched tile limits off for every window. The window
-		 * title isn't known this early, so only title-agnostic rules count. */
-		if (!streq(r->class_name, MATCH_ANY) && !streq(r->class_name, class_name)) {
+		/* The title, the type, the role and whether the window is
+		 * transient are not known this early, so only rules that look at
+		 * the class and the instance count. Testing the class alone meant
+		 * any rule with a wildcard class carrying this effect silently
+		 * switched tile limits off for every window. */
+		if (r->conds[RULE_PROP_NAME].used || r->conds[RULE_PROP_TYPE].used ||
+		    r->conds[RULE_PROP_ROLE].used || r->conds[RULE_PROP_TRANSIENT].used) {
 			continue;
 		}
-		if (!streq(r->instance_name, MATCH_ANY) && !streq(r->instance_name, instance_name)) {
+		if (!rule_cond_matches(&r->conds[RULE_PROP_CLASS], class_name)) {
 			continue;
 		}
-		if (!streq(r->name, MATCH_ANY)) {
+		if (!rule_cond_matches(&r->conds[RULE_PROP_INSTANCE], instance_name)) {
 			continue;
 		}
 		if (effect_has(r->effect, "ignore_tile_limits", "on")) {
