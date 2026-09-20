@@ -326,12 +326,42 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 		free(evt);
 		evt = xcb_wait_for_event(dpy);
 		if (!evt) {
-			xcb_flush(dpy);
+			/* NULL means the X connection errored (not "no event" — this call
+			 * blocks). Continuing would spin the drag loop at 100% CPU, so bail. */
+			if (xcb_connection_has_error(dpy)) {
+				grabbing = false;
+			}
 			continue;
 		}
 
 		uint8_t resp_type = XCB_EVENT_RESPONSE_TYPE(evt);
 		if (resp_type == XCB_MOTION_NOTIFY) {
+			/* Coalesce: drain everything xcb has already queued and keep only
+			 * the newest motion. Under load the queue backs up; acting on the
+			 * latest position (not the oldest) tracks the cursor and does one
+			 * move/resize per frame instead of one per stale sample. */
+			xcb_generic_event_t *qev;
+			while ((qev = xcb_poll_for_queued_event(dpy)) != NULL) {
+				uint8_t qt = XCB_EVENT_RESPONSE_TYPE(qev);
+				if (qt == XCB_MOTION_NOTIFY) {
+					free(evt);
+					evt = qev;
+				} else if (qt == XCB_BUTTON_RELEASE) {
+					grabbing = false;
+					free(qev);
+					break;
+				} else {
+					handle_event(qev);
+					free(qev);
+					if (grabbed_node && !locate_window(grabbed_node->id, &loc)) {
+						grabbed_node = NULL;
+					}
+				}
+			}
+			if (!grabbing || !grabbed_node) {
+				continue;
+			}
+
 			xcb_motion_notify_event_t *e = (xcb_motion_notify_event_t*) evt;
 			uint32_t dtime = e->time - last_motion_time;
 			if (dtime < pointer_motion_interval)

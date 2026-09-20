@@ -397,6 +397,22 @@ int main(int argc, char *argv[])
 			}
 		}
 
+#ifdef BACKEND_X11
+		/* Drain events xcb has already buffered in userspace. A handler above
+		 * (pending-rule window management, or any IPC command that issues an X
+		 * round-trip) pulls bytes off the socket into xcb's queue; those events
+		 * then sit unprocessed because epoll won't re-fire on an empty socket,
+		 * so an enter-notify/motion/focus-in stalls until the next unrelated
+		 * event. Flush the queue every iteration so input never waits. */
+		{
+			xcb_generic_event_t *qev;
+			while ((qev = xcb_poll_for_queued_event(dpy)) != NULL) {
+				handle_event(qev);
+				free(qev);
+			}
+		}
+#endif
+
 		if (!backend_check_connection()) {
 			running = false;
 		}
