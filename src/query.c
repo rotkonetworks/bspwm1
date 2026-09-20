@@ -1257,10 +1257,20 @@ bool node_matches(coordinates_t *loc, coordinates_t *ref, node_select_t *sel)
 		return false;
 	}
 
+	/* A node is "automatic" when it has no presel (a presel is a pending
+	 * manual split). The original test read as `(automatic != NONE &&
+	 * presel) ? (automatic == FALSE) : (automatic == TRUE)` — `&&` binds
+	 * tighter than `?:` — which inverts the sense: `.automatic` failed to
+	 * filter a presel'd node, and `.!automatic` failed to filter an
+	 * automatic one. Match against presel with explicit parentheses:
+	 *   automatic  presel   -> keep?
+	 *   TRUE       set      -> filter (node is manual, wanted automatic)
+	 *   TRUE       none     -> keep
+	 *   FALSE      set      -> keep
+	 *   FALSE      none     -> filter (node is automatic, wanted manual) */
 	if (sel->automatic != OPTION_NONE &&
-	    loc->node->presel
-	    ? sel->automatic == OPTION_FALSE
-	    : sel->automatic == OPTION_TRUE) {
+	    ((loc->node->presel != NULL) ? (sel->automatic == OPTION_TRUE)
+	                                 : (sel->automatic == OPTION_FALSE))) {
 		return false;
 	}
 
