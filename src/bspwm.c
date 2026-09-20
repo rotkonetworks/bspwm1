@@ -367,6 +367,12 @@ int main(int argc, char *argv[])
 						close(cli_fd);
 						continue;
 					}
+					/* Bound both directions: a client that connects and never
+					 * sends, or never reads its reply, must not hang the single
+					 * event loop. A real bspc exchange completes in microseconds. */
+					struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
+					setsockopt(cli_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+					setsockopt(cli_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 				}
 				if (cli_fd > 0) {
 					n = recv(cli_fd, msg, sizeof(msg)-1, 0);

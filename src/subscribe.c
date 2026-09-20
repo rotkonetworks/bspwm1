@@ -45,6 +45,20 @@ subscriber_list_t *make_subscriber(FILE *stream, char *fifo_path, int field, int
 	sb->fifo_path = fifo_path;
 	sb->field = field;
 	sb->count = count;
+	/* Non-blocking: a stopped or hung subscriber (a SIGSTOP'd bar, a reader
+	 * that isn't draining) must not freeze the WM inside fflush. A full write
+	 * then returns EAGAIN, fflush reports the error, and put_status drops the
+	 * subscriber instead of blocking the event loop — and, via the SYNC click
+	 * grab, the pointer for every client. */
+	if (stream != NULL) {
+		int sfd = fileno(stream);
+		if (sfd >= 0) {
+			int fl = fcntl(sfd, F_GETFL);
+			if (fl != -1) {
+				fcntl(sfd, F_SETFL, fl | O_NONBLOCK);
+			}
+		}
+	}
 	return sb;
 }
 
