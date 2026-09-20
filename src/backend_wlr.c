@@ -2799,19 +2799,13 @@ void backend_window_resize(bspwm_wid_t win, uint16_t w, uint16_t h)
 
 void backend_window_move_resize(bspwm_wid_t win, int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
-	{
-		struct bspwm_wlr_toplevel *ftl = toplevel_from_id(win);
-		if (ftl) {
-			/* Position first so the output lookup below sees the new place. */
-			wlr_scene_node_set_position(&ftl->scene_tree->node, x, y);
-			toplevel_update_foreign_output(ftl);
-		}
-	}
 	struct bspwm_wlr_toplevel *tl = toplevel_from_id(win);
 	if (tl) {
 		if (tl->scene_tree) {
+			/* Position first so the output lookup below sees the new place. */
 			wlr_scene_node_set_position(&tl->scene_tree->node, x, y);
 		}
+		toplevel_update_foreign_output(tl);
 		tl->req_width = w;
 		tl->req_height = h;
 		wlr_xdg_toplevel_set_size(tl->xdg_toplevel, w, h);
