@@ -169,6 +169,17 @@ static bool has_shell_meta(const char *s)
  * allocation, so scratch_reset() here frees only what we allocated. */
 static bool keybind_exec_inproc(const char *command)
 {
+#ifdef BACKEND_X11
+	/* During an interactive X11 drag, track_pointer() is a nested blocking
+	 * loop and the control socket is not accept()ed until it returns, so a
+	 * keybind pressed mid-drag has always been deferred to drag-release (bspc
+	 * blocks in recv()). Running it in-process instead would mutate the
+	 * grabbed node while move/resize is still operating on it. Preserve the
+	 * defer-to-release behavior by taking the (blocking) fork+sh path. */
+	extern bool grabbing;
+	if (grabbing) return false;
+#endif
+
 	while (*command == ' ' || *command == '\t') command++;
 
 	/* Must be exactly the `bspc` program, then whitespace. */
@@ -194,13 +205,22 @@ static bool keybind_exec_inproc(const char *command)
 	}
 	if (argc < 1) { scratch_reset(); return false; }
 
-	/* `subscribe` would keep the /dev/null stream alive as a dead subscriber. */
+	/* `subscribe` would keep the reply stream alive as a dead subscriber. */
 	if (streq(argv[0], "subscribe")) { scratch_reset(); return false; }
 
-	FILE *devnull = fopen("/dev/null", "w");
-	if (devnull == NULL) { scratch_reset(); return false; }
+	/* Route the reply to our stderr (as the real bspc's output would end up on
+	 * the WM's inherited stderr), so a failing binding is not silent. Use a
+	 * dup: process_message() fcloses the stream, which must not close the real
+	 * stderr fd. */
+	int efd = dup(STDERR_FILENO);
+	FILE *rsp = (efd >= 0) ? fdopen(efd, "w") : NULL;
+	if (rsp == NULL) {
+		if (efd >= 0) close(efd);
+		rsp = fopen("/dev/null", "w");
+		if (rsp == NULL) { scratch_reset(); return false; }
+	}
 
-	process_message(argv, argc, devnull); /* consumes (fcloses) devnull */
+	process_message(argv, argc, rsp); /* consumes (fcloses) rsp */
 	scratch_reset();
 	return true;
 	#undef KB_MAX_ARGS
