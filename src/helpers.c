@@ -60,6 +60,18 @@ int make_socket_path(char *buf, size_t buflen, const char *host, int dn, int sn)
 	return snprintf(buf, buflen, SOCKET_PATH_TPL, host, dn, sn);
 }
 
+/* State-file path, same $XDG_RUNTIME_DIR-preferred rule as the socket. Kept
+ * out of world-writable /tmp so another uid cannot plant, symlink, or FIFO
+ * the file bspwm re-reads across a restart. */
+int make_state_path(char *buf, size_t buflen, const char *host, int dn, int sn)
+{
+	const char *runtime = getenv("XDG_RUNTIME_DIR");
+	if (runtime != NULL && runtime[0] != '\0') {
+		return snprintf(buf, buflen, STATE_PATH_TPL_XDG, runtime, host, dn, sn);
+	}
+	return snprintf(buf, buflen, STATE_PATH_TPL, host, dn, sn);
+}
+
 __attribute__((cold, noreturn))
 void err(char *fmt, ...)
 {
@@ -85,6 +97,13 @@ char *read_string(const char *file_path, size_t *tlen)
     struct stat st;
     if (fstat(fd, &st) == -1) {
         perror("Read file: fstat");
+        close(fd);
+        return NULL;
+    }
+
+    if (!S_ISREG(st.st_mode) || st.st_uid != getuid()) {
+        warn("Refusing to read '%s': not a regular file owned by uid %u.\n",
+             file_path, (unsigned) getuid());
         close(fd);
         return NULL;
     }

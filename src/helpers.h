@@ -129,6 +129,7 @@ static inline __attribute__((warn_unused_result)) bool safe_double(size_t *val) 
 
 
 __attribute__((warn_unused_result)) int make_socket_path(char *buf, size_t buflen, const char *host, int dn, int sn);
+int make_state_path(char *buf, size_t buflen, const char *host, int dn, int sn);
 __attribute__((cold, format(printf, 1, 2))) void warn(char *fmt, ...);
 __attribute__((cold, format(printf, 1, 2), noreturn)) void err(char *fmt, ...);
 void secure_memzero(void *ptr, size_t len);

@@ -34,6 +34,7 @@
 #define RUNTIME_DIR_ENV          "XDG_RUNTIME_DIR"
 
 #define STATE_PATH_TPL           "/tmp/bspwm%s_%i_%i-state"
+#define STATE_PATH_TPL_XDG       "%s/bspwm%s_%i_%i-state"
 
 #define BSPWM_CLASS_NAME    "Bspwm"
 #define PRESEL_FEEDBACK_I   "presel_feedback"
@@ -71,6 +72,8 @@ extern bspwm_wid_t meta_window;
 extern motion_recorder_t motion_recorder;
 extern int exit_status;
 extern int epoll_fd;
+extern int sock_fd;
+extern int dpy_fd;
 
 extern bool auto_raise;
 extern bool sticky_still;

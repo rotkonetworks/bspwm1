@@ -217,6 +217,9 @@ bool parse_state_transition(char *s, state_transition_t *m)
 
    state_transition_t w = 0;
    char *x = copy_string(s, strlen(s));
+   if (x == NULL) {
+       return false;
+   }
    char *key = strtok(x, ",");
 
    while (key != NULL) {

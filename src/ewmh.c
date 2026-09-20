@@ -280,14 +280,14 @@ void ewmh_update_client_list(bool stacking)
 	unsigned int i = 0;
 
 	if (stacking) {
-		for (stacking_list_t *s = stack_head; s != NULL; s = s->next) {
+		for (stacking_list_t *s = stack_head; s != NULL && i < clients_count; s = s->next) {
 			wins[i++] = s->node->id;
 		}
 		xcb_ewmh_set_client_list_stacking(ewmh, default_screen, i, wins);
 	} else {
-		for (monitor_t *m = mon_head; m != NULL; m = m->next) {
-			for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
-				for (node_t *n = first_extrema(d->root); n != NULL; n = next_leaf(n, d->root)) {
+		for (monitor_t *m = mon_head; m != NULL && i < clients_count; m = m->next) {
+			for (desktop_t *d = m->desk_head; d != NULL && i < clients_count; d = d->next) {
+				for (node_t *n = first_extrema(d->root); n != NULL && i < clients_count; n = next_leaf(n, d->root)) {
 					if (n->client == NULL) {
 						continue;
 					}
@@ -315,9 +315,9 @@ void ewmh_update_client_lists(void)
 	}
 
 	unsigned int i = 0;
-	for (monitor_t *m = mon_head; m != NULL; m = m->next) {
-		for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
-			for (node_t *n = first_extrema(d->root); n != NULL; n = next_leaf(n, d->root)) {
+	for (monitor_t *m = mon_head; m != NULL && i < clients_count; m = m->next) {
+		for (desktop_t *d = m->desk_head; d != NULL && i < clients_count; d = d->next) {
+			for (node_t *n = first_extrema(d->root); n != NULL && i < clients_count; n = next_leaf(n, d->root)) {
 				if (n->client == NULL) {
 					continue;
 				}
@@ -328,7 +328,7 @@ void ewmh_update_client_lists(void)
 	xcb_ewmh_set_client_list(ewmh, default_screen, i, wins);
 
 	i = 0;
-	for (stacking_list_t *s = stack_head; s != NULL; s = s->next) {
+	for (stacking_list_t *s = stack_head; s != NULL && i < clients_count; s = s->next) {
 		wins[i++] = s->node->id;
 	}
 	xcb_ewmh_set_client_list_stacking(ewmh, default_screen, i, wins);

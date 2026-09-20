@@ -279,6 +279,18 @@ bool restore_state(const char *file_path)
 	 * up to this point. */
 	ensure_focused_monitor();
 
+	/* The state file supplies clientsCount, but a crafted or stale file can
+	 * disagree with the tree that actually restored. ewmh_update_client_list*
+	 * size their buffer from this global, so recompute it from the real tree
+	 * (prune_dead_nodes has already dropped dead nodes) before any client-list
+	 * update. Belt to the bounds guards in ewmh.c. */
+	clients_count = 0;
+	for (monitor_t *m = mon_head; m != NULL; m = m->next) {
+		for (desktop_t *d = m->desk_head; d != NULL; d = d->next) {
+			clients_count += clients_count_in(d->root);
+		}
+	}
+
 	ewmh_update_number_of_desktops();
 	ewmh_update_desktop_names();
 	ewmh_update_desktop_viewport();
@@ -729,7 +741,8 @@ void restore_subscriber(subscriber_list_t *s, jsmntok_t **t, char *json)
 				fd_max = 1024;
 			}
 			if (sscanf(json + (*t)->start, "%i", &fd) == 1 &&
-			    fd > STDERR_FILENO && fd < (int) fd_max) {
+			    fd > STDERR_FILENO && fd < (int) fd_max &&
+			    fd != sock_fd && fd != dpy_fd && fd != epoll_fd) {
 				struct stat st;
 				if (fstat(fd, &st) == 0 &&
 				    (S_ISSOCK(st.st_mode) || S_ISFIFO(st.st_mode) || S_ISREG(st.st_mode))) {
@@ -783,10 +796,13 @@ void restore_coordinates(coordinates_t *loc, jsmntok_t **t, char *json)
 
 void restore_stack(jsmntok_t **t, char *json)
 {
+	if (tok_oob(t)) {
+		return;
+	}
 	int s = (*t)->size;
 	(*t)++;
 
-	for (int i = 0; i < s; i++) {
+	for (int i = 0; i < s && !tok_oob(t); i++) {
 		uint32_t id;
 		if (sscanf(json + (*t)->start, "%u", &id) == 1) {
 			coordinates_t loc;

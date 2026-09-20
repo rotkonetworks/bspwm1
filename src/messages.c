@@ -2162,7 +2162,7 @@ void handle_failure(int code, char *src, char *val, FILE *rsp)
 
 void fail(FILE *rsp, char *fmt, ...)
 {
-	fprintf(rsp, FAILURE_MESSAGE);
+	fputs(FAILURE_MESSAGE, rsp);
 	va_list ap;
 	va_start(ap, fmt);
 	vfprintf(rsp, fmt, ap);

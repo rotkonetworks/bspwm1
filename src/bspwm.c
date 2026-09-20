@@ -85,6 +85,8 @@ bspwm_wid_t meta_window;
 motion_recorder_t motion_recorder;
 int exit_status;
 int epoll_fd;
+int sock_fd = -1;
+int dpy_fd = -1;
 
 bool auto_raise;
 bool sticky_still;
@@ -135,7 +137,7 @@ int main(int argc, char *argv[])
 	char state_path[MAXLEN] = {0};
 	int run_level = 0;
 	config_path[0] = '\0';
-	int sock_fd = -1, cli_fd, dpy_fd, n;
+	int cli_fd, n;
 	struct sockaddr_un sock_address;
 	char msg[BUFSIZ] = {0};
 	char *end;
@@ -411,7 +413,7 @@ int main(int argc, char *argv[])
 		int dn = 0, sn = 0;
 		bool have_path = false;
 		if (backend_parse_display(&host, &dn, &sn)) {
-			snprintf(state_path, sizeof(state_path), STATE_PATH_TPL, host, dn, sn);
+			make_state_path(state_path, sizeof(state_path), host, dn, sn);
 			have_path = true;
 		}
 		free(host);
@@ -421,7 +423,21 @@ int main(int argc, char *argv[])
 		 * tree and every window would be orphaned. Better to exit and let the
 		 * session bring us back cleanly. (This also used to reach fclose(NULL)
 		 * and crash outright when fopen failed.) */
-		FILE *f = have_path ? fopen(state_path, "w") : NULL;
+		FILE *f = NULL;
+		if (have_path) {
+			/* Exclusive create, 0600: never follow a symlink or reuse a file
+			 * planted at this path. The state file now lives under
+			 * $XDG_RUNTIME_DIR (0700), so a stale one from a prior run of ours
+			 * is the only thing we might collide with — clear it first. */
+			unlink(state_path);
+			int sfd = open(state_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+			if (sfd != -1) {
+				f = fdopen(sfd, "w");
+				if (f == NULL) {
+					close(sfd);
+				}
+			}
+		}
 		if (f == NULL) {
 			warn("Can't write the state file '%s'; cancelling restart.\n",
 			     have_path ? state_path : "<no display>");

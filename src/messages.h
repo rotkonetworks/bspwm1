@@ -43,6 +43,6 @@ void cmd_keybind(char **args, int num, FILE *rsp);
 void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp);
 void get_setting(coordinates_t loc, char *name, FILE* rsp);
 void handle_failure(int code, char *src, char *val, FILE *rsp);
-void fail(FILE *rsp, char *fmt, ...);
+void fail(FILE *rsp, char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
 #endif
