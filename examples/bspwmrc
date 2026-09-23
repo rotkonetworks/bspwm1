@@ -112,9 +112,45 @@ bspc rule -a "*:*:Open File" state=floating center=on
 bspc rule -a "*:*:Preferences" state=floating center=on
 bspc rule -a "*:*:Settings" state=floating center=on
 
-# browser extension popups
-# bspc rule -a "*:*:Extension:*" state=floating center=on
-# bspc rule -a "*:*:MetaMask Notification" state=floating center=on
+# ──────────────────────────────────────────
+# browser popups (extension approvals, wallet prompts, etc.)
+# ──────────────────────────────────────────
+#
+# Every popup a Chromium/Firefox extension opens via
+# chrome.windows.create({type: 'popup'}) — approval prompts,
+# password/autofill pickers, OAuth consent windows, anything a
+# background script pops in front of the user — sets
+# WM_WINDOW_ROLE=pop-up (Chromium) or Popup (Firefox). Match on that
+# role instead of chasing every extension's window title, and one
+# rule covers them all forever.
+#
+# desktop=focused opens the popup on whatever desktop is active at
+# trigger time. Without it, a Chromium rule that pins the main
+# browser to (say) desktop 2 also drags every extension popup there,
+# even when the trigger click happened on a different desktop.
+#
+# follow=off keeps focus where it was: if you fire an approval from
+# a bg script/notification while working elsewhere, focus doesn't
+# jump. Set follow=on if you'd rather always be flipped to the popup.
+#
+# See also `bspc rule -a transient=on state=floating` further down —
+# picks up dialogs that use WM_TRANSIENT_FOR instead of role.
+bspc rule -a Chromium         role=pop-up desktop=focused state=floating center=on follow=off
+bspc rule -a "Google-chrome"  role=pop-up desktop=focused state=floating center=on follow=off
+bspc rule -a Brave-browser    role=pop-up desktop=focused state=floating center=on follow=off
+bspc rule -a firefox          role=Popup  desktop=focused state=floating center=on follow=off
+bspc rule -a librewolf        role=Popup  desktop=focused state=floating center=on follow=off
+
+# Belt-and-braces: any short-lived helper window a client opens for
+# its parent (about-dialogs, confirmations, extension-permission
+# prompts on install) sets WM_TRANSIENT_FOR. Floating them keeps them
+# from busting the tiling of whatever you were doing.
+bspc rule -a transient=on state=floating center=on
+
+# Fallback for extensions that omit the role and only differ by
+# title. Prefer the role-based rule above; keep these as a safety net.
+# bspc rule -a "*:*:*Notification*" state=floating center=on follow=off
+# bspc rule -a "*:*:Extension:*"    state=floating center=on follow=off
 
 # ──────────────────────────────────────────
 # x settings
