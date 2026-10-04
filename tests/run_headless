@@ -312,6 +312,15 @@ assert_eq "border_width was set" "3" "$BW2"
 # T19: restore
 assert_ok "restore border_width" $BSPC config border_width "$BW"
 
+# magnet_threshold: off by default, settable, out-of-range refused.
+MT0=$($BSPC config magnet_threshold 2>/dev/null)
+assert_eq "magnet_threshold defaults to 0 (off)" "0" "$MT0"
+assert_ok "set magnet_threshold" $BSPC config magnet_threshold 16
+MT1=$($BSPC config magnet_threshold 2>/dev/null)
+assert_eq "magnet_threshold was set" "16" "$MT1"
+assert_fail "magnet_threshold rejects out-of-range" $BSPC config magnet_threshold 999
+$BSPC config magnet_threshold 0 >/dev/null 2>&1 || true
+
 echo ""
 echo "== Window management =="
 
@@ -494,23 +503,25 @@ fi
 TESTS_RUN=$((TESTS_RUN + 1))
 BSPWM_PID=""
 
-# ---- rule_match unit tests (backend-agnostic, no display needed) ----
+# ---- unit tests (backend-agnostic, no display needed) ----
 echo ""
-echo "== rule_match unit tests =="
-if [ -x ./test_rule_match ]; then
-	if ./test_rule_match > /tmp/bspwm_rule_match_unit.$$ 2>&1; then
-		printf "%b\n" "  ${GREEN}PASS${NC}: rule_match unit suite"
-		PASS=$((PASS + 1))
+echo "== unit tests =="
+for unit in rule_match magnet; do
+	if [ -x "./test_$unit" ]; then
+		if "./test_$unit" > "/tmp/bspwm_${unit}_unit.$$" 2>&1; then
+			printf "%b\n" "  ${GREEN}PASS${NC}: $unit unit suite"
+			PASS=$((PASS + 1))
+		else
+			printf "%b\n" "  ${RED}FAIL${NC}: $unit unit suite"
+			sed 's/^/    /' "/tmp/bspwm_${unit}_unit.$$"
+			FAIL=$((FAIL + 1))
+		fi
+		TESTS_RUN=$((TESTS_RUN + 1))
+		rm -f "/tmp/bspwm_${unit}_unit.$$"
 	else
-		printf "%b\n" "  ${RED}FAIL${NC}: rule_match unit suite"
-		sed 's/^/    /' /tmp/bspwm_rule_match_unit.$$
-		FAIL=$((FAIL + 1))
+		printf "%b\n" "  ${YELLOW}SKIP${NC}: $unit unit suite (not built)"
 	fi
-	TESTS_RUN=$((TESTS_RUN + 1))
-	rm -f /tmp/bspwm_rule_match_unit.$$
-else
-	printf "%b\n" "  ${YELLOW}SKIP${NC}: rule_match unit suite (not built)"
-fi
+done
 
 # ---- Report ----
 

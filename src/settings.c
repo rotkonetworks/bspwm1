@@ -78,6 +78,7 @@ int max_tiles_per_desktop;
 /* Windows-like snap behavior */
 bool edge_snap_enabled;
 int edge_snap_threshold;
+int magnet_threshold;
 bool raise_floating_on_click;
 int cascade_offset;
 
@@ -150,6 +151,7 @@ void load_settings(void)
 	/* Windows-like snap behavior */
 	edge_snap_enabled = EDGE_SNAP_ENABLED;
 	edge_snap_threshold = EDGE_SNAP_THRESHOLD;
+	magnet_threshold = MAGNET_THRESHOLD;
 	raise_floating_on_click = RAISE_FLOATING_ON_CLICK;
 	cascade_offset = CASCADE_OFFSET;
 }

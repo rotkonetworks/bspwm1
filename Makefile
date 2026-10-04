@@ -15,7 +15,7 @@ CORE_SRC = bspwm.c helpers.c geometry.c jsmn.c settings.c monitor.c desktop.c tr
 # be installed side by side.
 ifeq ($(BACKEND),x11)
     WM_BIN       = bspwm
-    BACKEND_SRC  = backend_x11.c events.c pointer.c window.c ewmh.c
+    BACKEND_SRC  = backend_x11.c events.c pointer.c window.c ewmh.c magnet.c
     BACKEND_LIBS = -lxcb -lxcb-util -lxcb-keysyms -lxcb-icccm -lxcb-ewmh -lxcb-randr -lxcb-xinerama -lxcb-shape -lxkbcommon
     CPPFLAGS += -DBACKEND_X11
     SESSION_FILE = contrib/freedesktop/bspwm.desktop

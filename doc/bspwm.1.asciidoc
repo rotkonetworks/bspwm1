@@ -888,6 +888,9 @@ Global Settings
 'edge_snap_threshold'::
 	Distance in pixels from a monitor edge at which a drag enters a snap zone. Defaults to *20*.
 
+'magnet_threshold'::
+	Inter-window magnetism: while a floating window is dragged or resized, its edges stick to the work area and to the edges of other visible windows that come within this many pixels. Edges hidden behind a window stacked above are ignored. Only floating windows are affected, and only on the X11 backend. Set to *0* to disable. Defaults to *0*.
+
 'cascade_offset'::
 	When bspwm centres a new floating window on its own initiative (because the window supplied no position), offset each successive one by this many pixels so they don't stack exactly on top of each other. Set to *0* to disable. Windows centred because a rule said *center=on* are never cascaded. Defaults to *20*.
 

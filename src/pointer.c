@@ -35,6 +35,7 @@
 #include "events.h"
 #include "window.h"
 #include "snap.h"
+#include "magnet.h"
 #include "pointer.h"
 
 uint16_t num_lock;
@@ -304,6 +305,226 @@ bool grab_pointer(pointer_action_t pac)
 	return true;
 }
 
+/* ---- Magnetic edges (inter-window snapping, X11) ---------------------- */
+
+/* The MAGNET_* bits are shared with resize_handle_t so a handle casts straight
+ * to an edge mask; cast both sides because -Wenum-compare flags a bare compare
+ * between the anonymous magnet enum and resize_handle_t. */
+static_assert((int) MAGNET_LEFT == (int) HANDLE_LEFT && (int) MAGNET_TOP == (int) HANDLE_TOP &&
+              (int) MAGNET_RIGHT == (int) HANDLE_RIGHT && (int) MAGNET_BOTTOM == (int) HANDLE_BOTTOM,
+              "magnet edges must match resize handles");
+
+/* At most this many windows of a desktop take part in a magnet pass. */
+#define MAGNET_MAX_WINDOWS 64
+
+/* Per-drag snapshot of the X stacking order (bottom first) plus an id->level
+ * index sorted by window id. The magnet needs each window's stacking level to
+ * tell which edges are hidden behind windows above; building the index once
+ * per drag turns the per-window lookup from a linear scan of the whole child
+ * list into a binary search. Other windows do not restack mid-drag (we hold
+ * the pointer grab), so the snapshot stays valid for the drag's lifetime. */
+typedef struct { xcb_window_t id; int level; } magnet_level_t;
+static xcb_query_tree_reply_t *magnet_stack = NULL;
+static magnet_level_t *magnet_levels = NULL;
+static int magnet_levels_len = 0;
+
+static int magnet_level_cmp(const void *a, const void *b)
+{
+	xcb_window_t ia = ((const magnet_level_t *) a)->id;
+	xcb_window_t ib = ((const magnet_level_t *) b)->id;
+	return (ia > ib) - (ia < ib);
+}
+
+static void magnet_stack_acquire(void)
+{
+	magnet_stack = xcb_query_tree_reply(dpy, xcb_query_tree(dpy, root), NULL);
+	magnet_levels = NULL;
+	magnet_levels_len = 0;
+	if (magnet_stack == NULL)
+		return;
+	xcb_window_t *wins = xcb_query_tree_children(magnet_stack);
+	int len = xcb_query_tree_children_length(magnet_stack);
+	if (len <= 0)
+		return;
+	magnet_levels = malloc((size_t) len * sizeof(*magnet_levels));
+	if (magnet_levels == NULL)
+		return;
+	for (int i = 0; i < len; i++)
+		magnet_levels[i] = (magnet_level_t) {wins[i], i};
+	qsort(magnet_levels, (size_t) len, sizeof(*magnet_levels), magnet_level_cmp);
+	magnet_levels_len = len;
+}
+
+static void magnet_stack_release(void)
+{
+	free(magnet_levels);
+	magnet_levels = NULL;
+	magnet_levels_len = 0;
+	free(magnet_stack);
+	magnet_stack = NULL;
+}
+
+/* Events that change what the stacking snapshot should say: a window mapping,
+ * unmapping, going away, or restacking while we drag. They arrive on root
+ * (bspwm selects SubstructureNotify there) and are handled between motions, so
+ * the snapshot is refreshed when one does. */
+static bool magnet_stack_stale_after(uint8_t resp_type)
+{
+	switch (resp_type) {
+	case XCB_MAP_NOTIFY:
+	case XCB_UNMAP_NOTIFY:
+	case XCB_DESTROY_NOTIFY:
+	case XCB_CONFIGURE_NOTIFY:
+	case XCB_REPARENT_NOTIFY:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/* Stacking level of a window (bottom first), or -1 if not in the snapshot. */
+static int magnet_stack_index(bspwm_wid_t win)
+{
+	int lo = 0, hi = magnet_levels_len - 1;
+	xcb_window_t key = (xcb_window_t) win;
+	while (lo <= hi) {
+		int mid = (lo + hi) / 2;
+		if (magnet_levels[mid].id == key)
+			return magnet_levels[mid].level;
+		if (magnet_levels[mid].id < key)
+			lo = mid + 1;
+		else
+			hi = mid - 1;
+	}
+	return -1;
+}
+
+/* Outer box of a node's window: its rectangle plus the border on both sides. */
+static magnet_box_t magnet_box_of(node_t *n)
+{
+	bspwm_rect_t r = get_rectangle(NULL, NULL, n);
+	int b = 2 * (int) n->client->border_width;
+	return (magnet_box_t) {r.x, r.y, r.x + r.width + b, r.y + r.height + b};
+}
+
+/* Work area of a desktop, computed the way arrange() does. */
+static magnet_box_t magnet_area_of(monitor_t *m, desktop_t *d)
+{
+	bspwm_rect_t r = m->rectangle;
+	padding_t p = m->padding;
+	if (d != NULL) {
+		p.top += d->padding.top;
+		p.right += d->padding.right;
+		p.bottom += d->padding.bottom;
+		p.left += d->padding.left;
+	}
+	return (magnet_box_t) {r.x + p.left, r.y + p.top,
+	                       r.x + r.width - p.right, r.y + r.height - p.bottom};
+}
+
+/* Where the dragged window goes when the pointer alone would put it at `free`:
+ * a magnet pass against the work area and the other visible windows. A move is
+ * checked against the monitor the window is about to land on, so it sticks to
+ * the new monitor in the same step. */
+static magnet_box_t magnet_snap_node(coordinates_t *loc, magnet_box_t free, unsigned int edges)
+{
+	monitor_t *m = loc->monitor;
+	desktop_t *d = loc->desktop;
+	if (edges == MAGNET_ALL) {
+		/* Compute the centre in int and clamp to the point type's range:
+		 * monitor coordinates are int16_t, so a centre past that is off the
+		 * rightmost/bottommost monitor and clamps onto it instead of
+		 * wrapping negative and selecting the wrong one. */
+		int cx = (free.x1 + free.x2) / 2;
+		int cy = (free.y1 + free.y2) / 2;
+		if (cx < INT16_MIN) cx = INT16_MIN; else if (cx > INT16_MAX) cx = INT16_MAX;
+		if (cy < INT16_MIN) cy = INT16_MIN; else if (cy > INT16_MAX) cy = INT16_MAX;
+		bspwm_point_t center = {(int16_t) cx, (int16_t) cy};
+		monitor_t *target = monitor_from_point(center);
+		if (target != NULL && target != m) {
+			m = target;
+			d = target->desk;
+		}
+	}
+
+	magnet_t mg;
+	magnet_begin(&mg, free, edges, magnet_area_of(m, d), magnet_threshold);
+	if (d != NULL) {
+		/* Every other window on screen, with its place in the stack. */
+		magnet_box_t boxes[MAGNET_MAX_WINDOWS];
+		int levels[MAGNET_MAX_WINDOWS];
+		size_t count = 0;
+		for (node_t *f = first_extrema(d->root); f != NULL && count < MAGNET_MAX_WINDOWS;
+		     f = next_leaf(f, d->root)) {
+			if (f == loc->node || f->client == NULL || f->hidden || !f->client->shown)
+				continue;
+			boxes[count] = magnet_box_of(f);
+			levels[count] = magnet_stack_index(f->id);
+			count++;
+		}
+		for (size_t i = 0; i < count; i++) {
+			magnet_box_t above[MAGNET_MAX_WINDOWS];
+			size_t na = 0;
+			for (size_t j = 0; j < count; j++)
+				if (levels[j] > levels[i])
+					above[na++] = boxes[j];
+			magnet_consider_visible(&mg, boxes[i], above, na);
+		}
+	}
+	return magnet_result(&mg);
+}
+
+/* One resize step with magnetic edges. `free` holds where the dragged edges
+ * would be without the magnet and is advanced by this motion first. */
+static void magnet_resize(coordinates_t *loc, resize_handle_t rh, magnet_box_t *free,
+                          int root_x, int root_y, int dx, int dy, bool absolute)
+{
+	int b = 2 * (int) loc->node->client->border_width;
+	if (absolute) {
+		/* resize_client puts the outer left/top edge at the pointer, and
+		 * x + width (y + height) for the right (bottom) edge, which is the
+		 * outer edge minus both borders. */
+		if (rh & HANDLE_LEFT)
+			free->x1 = root_x;
+		if (rh & HANDLE_RIGHT)
+			free->x2 = root_x + b;
+		if (rh & HANDLE_TOP)
+			free->y1 = root_y;
+		if (rh & HANDLE_BOTTOM)
+			free->y2 = root_y + b;
+	} else {
+		if (rh & HANDLE_LEFT)
+			free->x1 += dx;
+		if (rh & HANDLE_RIGHT)
+			free->x2 += dx;
+		if (rh & HANDLE_TOP)
+			free->y1 += dy;
+		if (rh & HANDLE_BOTTOM)
+			free->y2 += dy;
+	}
+
+	magnet_box_t want = magnet_snap_node(loc, *free, (unsigned int) rh);
+
+	if (absolute) {
+		int ax = (rh & HANDLE_LEFT) ? want.x1 : want.x2 - b;
+		int ay = (rh & HANDLE_TOP) ? want.y1 : want.y2 - b;
+		resize_client(loc, rh, ax, ay, false);
+		return;
+	}
+
+	magnet_box_t cur = magnet_box_of(loc->node);
+	int ddx = 0, ddy = 0;
+	if (rh & HANDLE_LEFT)
+		ddx = want.x1 - cur.x1;
+	else if (rh & HANDLE_RIGHT)
+		ddx = want.x2 - cur.x2;
+	if (rh & HANDLE_TOP)
+		ddy = want.y1 - cur.y1;
+	else if (rh & HANDLE_BOTTOM)
+		ddy = want.y2 - cur.y2;
+	resize_client(loc, rh, ddx, ddy, true);
+}
+
 void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 {
 	node_t *n = loc.node;
@@ -311,6 +532,14 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 		return;
 
 	resize_handle_t rh = get_handle(loc.node, pos, pac);
+
+	/* Magnetic edges: the box the pointer alone would give the window, which
+	 * the magnet then adjusts on every motion. Off (and free) unless the
+	 * window floats and magnet_threshold is set. */
+	bool magnet_on = magnet_threshold > 0 && IS_FLOATING(n->client);
+	magnet_box_t magnet_free = magnet_on ? magnet_box_of(n) : (magnet_box_t) {0};
+	if (magnet_on)
+		magnet_stack_acquire();
 
 	uint16_t last_motion_x = pos.x, last_motion_y = pos.y;
 	xcb_timestamp_t last_motion_time = 0;
@@ -352,6 +581,10 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 					break;
 				} else {
 					handle_event(qev);
+					if (magnet_on && magnet_stack_stale_after(qt)) {
+						magnet_stack_release();
+						magnet_stack_acquire();
+					}
 					free(qev);
 					if (grabbed_node && !locate_window(grabbed_node->id, &loc)) {
 						grabbed_node = NULL;
@@ -372,7 +605,17 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 			int16_t dy = e->root_y - last_motion_y;
 
 			if (pac == ACTION_MOVE) {
-				move_client(&loc, dx, dy);
+				if (magnet_on) {
+					/* Advance the pointer-only box, then let the magnet
+					 * pull it to nearby edges and move by that delta. */
+					magnet_free.x1 += dx; magnet_free.x2 += dx;
+					magnet_free.y1 += dy; magnet_free.y2 += dy;
+					magnet_box_t want = magnet_snap_node(&loc, magnet_free, MAGNET_ALL);
+					magnet_box_t cur = magnet_box_of(n);
+					move_client(&loc, want.x1 - cur.x1, want.y1 - cur.y1);
+				} else {
+					move_client(&loc, dx, dy);
+				}
 
 				/* Check for edge snap zones while dragging */
 				if (edge_snap_enabled) {
@@ -390,7 +633,10 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 				}
 			} else if (n && n->client) {
 				client_t *c = n->client;
-				if (SHOULD_HONOR_SIZE_HINTS(c->honor_size_hints, c->state)) {
+				bool absolute = SHOULD_HONOR_SIZE_HINTS(c->honor_size_hints, c->state);
+				if (magnet_on) {
+					magnet_resize(&loc, rh, &magnet_free, e->root_x, e->root_y, dx, dy, absolute);
+				} else if (absolute) {
 					resize_client(&loc, rh, e->root_x, e->root_y, false);
 				} else {
 					resize_client(&loc, rh, dx, dy, true);
@@ -403,6 +649,10 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 			grabbing = false;
 		} else {
 			handle_event(evt);
+			if (magnet_on && magnet_stack_stale_after(resp_type)) {
+				magnet_stack_release();
+				magnet_stack_acquire();
+			}
 			/* handle_event may have moved the grabbed node to another
 			 * desktop/monitor (e.g. via _NET_WM_DESKTOP), which would
 			 * make loc.desktop / loc.monitor stale. Refresh loc so
@@ -413,6 +663,9 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 			}
 		}
 	} while (grabbing && grabbed_node);
+
+	if (magnet_on)
+		magnet_stack_release();
 
 	/* Hide snap preview and apply snap if released in a zone */
 	destroy_snap_preview();

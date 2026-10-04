@@ -2,12 +2,12 @@
 .\"     Title: bspwm
 .\"    Author: [see the "Author" section]
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: 09/20/2026
+.\"      Date: 10/05/2026
 .\"    Manual: Bspwm Manual
-.\"    Source: Bspwm v1.6.5-2-gaa5a6eb
+.\"    Source: Bspwm v1.6.5-4-g2d7df03
 .\"  Language: English
 .\"
-.TH "BSPWM" "1" "09/20/2026" "Bspwm v1\&.6\&.5\-2\-gaa5a6eb" "Bspwm Manual"
+.TH "BSPWM" "1" "10/05/2026" "Bspwm v1\&.6\&.5\-4\-g2d7df03" "Bspwm Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -1473,6 +1473,14 @@ under
 .RS 4
 Distance in pixels from a monitor edge at which a drag enters a snap zone\&. Defaults to
 \fB20\fR\&.
+.RE
+.PP
+\fImagnet_threshold\fR
+.RS 4
+Inter\-window magnetism: while a floating window is dragged or resized, its edges stick to the work area and to the edges of other visible windows that come within this many pixels\&. Edges hidden behind a window stacked above are ignored\&. Only floating windows are affected, and only on the X11 backend\&. Set to
+\fB0\fR
+to disable\&. Defaults to
+\fB0\fR\&.
 .RE
 .PP
 \fIcascade_offset\fR

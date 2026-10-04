@@ -79,6 +79,9 @@
 #define EDGE_SNAP_ENABLED           true
 #define EDGE_SNAP_THRESHOLD         20
 #define RAISE_FLOATING_ON_CLICK     true
+/* Inter-window magnetism: a floating window's edges stick to the work area and
+ * to nearby windows within this many pixels while dragging/resizing. 0 = off. */
+#define MAGNET_THRESHOLD            0
 #define CASCADE_OFFSET              20
 
 extern char external_rules_command[MAXLEN];
@@ -133,6 +136,7 @@ extern int max_tiles_per_desktop;
 /* Windows-like snap behavior */
 extern bool edge_snap_enabled;
 extern int edge_snap_threshold;
+extern int magnet_threshold;
 extern bool raise_floating_on_click;
 extern int cascade_offset;
 
