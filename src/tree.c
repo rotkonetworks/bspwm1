@@ -2049,6 +2049,14 @@ bool swap_nodes(monitor_t *m1, desktop_t *d1, node_t *n1, monitor_t *m2, desktop
 		ewmh_set_wm_desktop(n1, d2);
 		ewmh_set_wm_desktop(n2, d1);
 
+		/* n1 and n2 (and their descendants) just changed desktop/monitor by
+		 * rewriting root/parent pointers directly rather than through
+		 * unlink_node (which is where the locate_window cache is normally
+		 * cleared). That cache keys on window id but does not re-validate the
+		 * cached monitor/desktop, so stale entries would resolve these windows
+		 * to their old desktop. Clear it. */
+		locate_window_cache_clear();
+
 		history_remove(d1, n1, true);
 		history_remove(d2, n2, true);
 
