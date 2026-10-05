@@ -499,7 +499,7 @@ void cmd_node(char **args, int num, FILE *rsp)
 					num--, args++;
 					if (sscanf(*args, "%i", &dy) == 1) {
 						if (!resize_client(&trg, rh, dx, dy, true)) {
-							fail(rsp, "%s", "");
+							fail(rsp, "node -z %s: no fence on that side to resize (the window edge is a screen border; resize the opposite edge instead).\n", *(args - 2));
 							break;
 						}
 					} else {
