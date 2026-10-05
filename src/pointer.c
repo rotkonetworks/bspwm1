@@ -221,6 +221,16 @@ resize_handle_t get_handle(node_t *n, bspwm_point_t pos, pointer_action_t pac)
 
 bool grab_pointer(pointer_action_t pac)
 {
+	/* Refuse a nested grab. track_pointer()'s loop runs handle_event() on
+	 * non-motion events (the coalescing drain and the else-branch), so a
+	 * second button pressed mid-drag reaches button_press() -> here again.
+	 * Re-entering track_pointer() would free the process-global magnet
+	 * stacking snapshot the outer drag is still reading (use-after-free) and
+	 * clobber the grabbing/grabbed_node globals. Every other path back into
+	 * the grab loop already guards on `grabbing`; button_press was the hole. */
+	if (grabbing)
+		return true;
+
 	bspwm_wid_t win = BSPWM_WID_NONE;
 	bspwm_point_t pos;
 
