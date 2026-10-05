@@ -378,13 +378,21 @@ static void magnet_stack_release(void)
  * unmapping, going away, or restacking while we drag. They arrive on root
  * (bspwm selects SubstructureNotify there) and are handled between motions, so
  * the snapshot is refreshed when one does. */
-static bool magnet_stack_stale_after(uint8_t resp_type)
+static bool magnet_stack_stale_after(xcb_generic_event_t *ev, bspwm_wid_t self)
 {
-	switch (resp_type) {
+	switch (XCB_EVENT_RESPONSE_TYPE(ev)) {
+	case XCB_CONFIGURE_NOTIFY: {
+		/* Our own move/resize of the dragged window — and the snap-preview
+		 * window — emit a ConfigureNotify every frame but restack nothing
+		 * else. Counting those would rebuild the snapshot every frame,
+		 * defeating the once-per-drag design. Only another window's
+		 * restack matters. */
+		xcb_configure_notify_event_t *e = (xcb_configure_notify_event_t *) ev;
+		return e->window != self && e->window != snap_preview_win;
+	}
 	case XCB_MAP_NOTIFY:
 	case XCB_UNMAP_NOTIFY:
 	case XCB_DESTROY_NOTIFY:
-	case XCB_CONFIGURE_NOTIFY:
 	case XCB_REPARENT_NOTIFY:
 		return true;
 	default:
@@ -548,6 +556,11 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 	 * window floats and magnet_threshold is set. */
 	bool magnet_on = magnet_threshold > 0 && IS_FLOATING(n->client);
 	magnet_box_t magnet_free = magnet_on ? magnet_box_of(n) : (magnet_box_t) {0};
+	/* Captured as a value (not n->id) so the stale-check never dereferences a
+	 * node that handle_event may have freed mid-drag. `magnet_stale` defers
+	 * the snapshot rebuild to at most once per frame. */
+	bspwm_wid_t drag_wid = n->id;
+	bool magnet_stale = false;
 	if (magnet_on)
 		magnet_stack_acquire();
 
@@ -591,9 +604,8 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 					break;
 				} else {
 					handle_event(qev);
-					if (magnet_on && magnet_stack_stale_after(qt)) {
-						magnet_stack_release();
-						magnet_stack_acquire();
+					if (magnet_on && magnet_stack_stale_after(qev, drag_wid)) {
+						magnet_stale = true;
 					}
 					free(qev);
 					if (grabbed_node && !locate_window(grabbed_node->id, &loc)) {
@@ -601,18 +613,31 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 					}
 				}
 			}
-			if (!grabbing || !grabbed_node) {
+			if (!grabbed_node) {
 				continue;
 			}
 
 			xcb_motion_notify_event_t *e = (xcb_motion_notify_event_t*) evt;
 			uint32_t dtime = e->time - last_motion_time;
-			if (dtime < pointer_motion_interval)
+			/* Throttle only while the drag continues. If BUTTON_RELEASE
+			 * coalesced into this iteration, `grabbing` is already false and
+			 * `evt` still holds the newest motion — apply it once (no throttle)
+			 * so the window lands where the pointer actually ended, then the
+			 * loop exits. Otherwise a fast release drops the final frame. */
+			if (grabbing && dtime < pointer_motion_interval)
 				continue;
 
 			last_motion_time = e->time;
 			int16_t dx = e->root_x - last_motion_x;
 			int16_t dy = e->root_y - last_motion_y;
+
+			/* Rebuild the stacking snapshot at most once per acted-on frame,
+			 * and only when another window actually restacked. */
+			if (magnet_on && magnet_stale) {
+				magnet_stack_release();
+				magnet_stack_acquire();
+				magnet_stale = false;
+			}
 
 			if (pac == ACTION_MOVE) {
 				if (magnet_on) {
@@ -659,9 +684,8 @@ void track_pointer(coordinates_t loc, pointer_action_t pac, bspwm_point_t pos)
 			grabbing = false;
 		} else {
 			handle_event(evt);
-			if (magnet_on && magnet_stack_stale_after(resp_type)) {
-				magnet_stack_release();
-				magnet_stack_acquire();
+			if (magnet_on && magnet_stack_stale_after(evt, drag_wid)) {
+				magnet_stale = true;
 			}
 			/* handle_event may have moved the grabbed node to another
 			 * desktop/monitor (e.g. via _NET_WM_DESKTOP), which would
