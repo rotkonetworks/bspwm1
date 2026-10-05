@@ -204,7 +204,13 @@ void add_pending_rule(pending_rule_t *pr)
 		pending_rule_tail = pr;
 	}
 	struct epoll_event ev = { .events = EPOLLIN, .data.fd = pr->fd };
-	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, pr->fd, &ev);
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, pr->fd, &ev) == -1) {
+		/* The fd would never become readable, so the pending rule would
+		 * never be serviced or freed — a permanent fd/memory leak. Drop it
+		 * instead (the window simply manages without the external rule). */
+		warn("add_pending_rule: epoll_ctl failed; dropping pending rule.\n");
+		remove_pending_rule(pr);
+	}
 }
 
 void remove_pending_rule(pending_rule_t *pr)
@@ -536,7 +542,17 @@ bool schedule_rules(bspwm_wid_t win, rule_consequence_t *csq)
 	} else if (pid > 0) {
 		close(fds[1]);
 		pending_rule_t *pr = make_pending_rule(fds[0], win, csq);
+		if (pr == NULL) {
+			/* Can't track the child's reply. Don't leak the read end; return
+			 * false so the caller manages the window (and frees csq) directly. */
+			close(fds[0]);
+			return false;
+		}
 		add_pending_rule(pr);
+	} else {
+		/* fork() failed: neither end of the pipe will ever be used. */
+		close(fds[0]);
+		close(fds[1]);
 	}
 	return (pid != -1);
 }

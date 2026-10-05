@@ -29,6 +29,7 @@
 #include <strings.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <ctype.h>
 #include <xkbcommon/xkbcommon.h>
 #include "helpers.h"
@@ -213,6 +214,15 @@ static bool keybind_exec_inproc(const char *command)
 	 * dup: process_message() fcloses the stream, which must not close the real
 	 * stderr fd. */
 	int efd = dup(STDERR_FILENO);
+	if (efd >= 0) {
+		/* Non-blocking: this runs on the single event-loop thread. If stderr
+		 * is a pipe nobody is draining, a verbose reply must drop output
+		 * rather than block the whole WM in fwrite/fclose. */
+		int fl = fcntl(efd, F_GETFL);
+		if (fl != -1) {
+			fcntl(efd, F_SETFL, fl | O_NONBLOCK);
+		}
+	}
 	FILE *rsp = (efd >= 0) ? fdopen(efd, "w") : NULL;
 	if (rsp == NULL) {
 		if (efd >= 0) close(efd);

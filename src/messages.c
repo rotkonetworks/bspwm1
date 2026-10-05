@@ -1269,6 +1269,10 @@ void cmd_rule(char **args, int num, FILE *rsp)
 				return;
 			}
 			rule_t *rule = make_rule();
+			if (rule == NULL) {
+				fail(rsp, "rule: Allocation failed.\n");
+				return;
+			}
 			rule->one_shot = one_shot;
 
 			/* The new form is a list of `property=pattern` conditions
@@ -1725,6 +1729,14 @@ void cmd_subscribe(char **args, int num, FILE *rsp)
 	}
 
 	subscriber_list_t *sb = make_subscriber(stream, fifo_path, field, count);
+	if (sb == NULL) {
+		/* add_subscriber would no-op on NULL, leaking the open stream (and
+		 * the FIFO). Close it and remove the FIFO. */
+		if (stream != NULL) {
+			fclose(stream);
+		}
+		goto free_fifo_path;
+	}
 	add_subscriber(sb);
 	return;
 

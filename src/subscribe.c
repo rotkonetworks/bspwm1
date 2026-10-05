@@ -81,14 +81,14 @@ void remove_subscriber(subscriber_list_t *sb)
 	if (sb == subscribe_tail) {
 		subscribe_tail = a;
 	}
-	if (restart) {
-		int cli_fd = fileno(sb->stream);
-		/* Keep fd open for restart but mark for cleanup */
-		fcntl(cli_fd, F_SETFD, ~FD_CLOEXEC & fcntl(cli_fd, F_GETFD));
-	} else {
-		fclose(sb->stream);
-		unlink(sb->fifo_path);
-	}
+	/* Always close the stream and remove the FIFO. The restart path used to
+	 * keep the fd open (clearing FD_CLOEXEC) to hand subscribers to the
+	 * re-exec'd instance, but that adoption was never implemented — init()
+	 * drops all subscribers across a re-exec — so keeping it open only leaked
+	 * the fd (it survives execvp with nothing to close it) and left the FIFO
+	 * file behind in $XDG_RUNTIME_DIR, once per subscriber per restart. */
+	fclose(sb->stream);
+	unlink(sb->fifo_path);
 	free(sb->fifo_path);
 	free(sb);
 }

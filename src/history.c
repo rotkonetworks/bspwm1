@@ -213,6 +213,7 @@ void empty_history(void)
 		h = next;
 	}
 	history_head = history_tail = NULL;
+	history_needle = NULL;
 	history_count = 0;
 }
 
