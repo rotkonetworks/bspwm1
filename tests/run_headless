@@ -184,6 +184,35 @@ assert_not_empty "has desktops" "$DESKTOPS"
 TREE=$($BSPC query -T -m 2>/dev/null)
 assert_not_empty "query --tree returns data" "$TREE"
 
+# T5b: a second bspwm that resolves THIS socket (via BSPWM_SOCKET) but runs on
+# another display must refuse, not unlink the live socket out from under us.
+# Regression for the "bspc control dies, keybinds stop" incident.
+if [ "$BACKEND" = "x11" ]; then
+	FIRST_SOCK="${XDG_RUNTIME_DIR:-/tmp}/bspwm_${DISPLAY_NUM}_0-socket"
+	if [ -S "$FIRST_SOCK" ]; then
+		DN2=$((DISPLAY_NUM + 50))
+		while [ -e "/tmp/.X${DN2}-lock" ]; do DN2=$((DN2 + 1)); done
+		Xvfb ":${DN2}" -screen 0 640x480x24 >/dev/null 2>&1 &
+		XVFB2_PID=$!
+		sleep 0.5
+		BSPWM_SOCKET="$FIRST_SOCK" DISPLAY=":${DN2}" "$BSPWM" -c /dev/null >/dev/null 2>&1 &
+		SECOND_PID=$!
+		sleep 1
+		if kill -0 "$SECOND_PID" 2>/dev/null; then
+			printf "%b\n" "  ${RED}FAIL${NC}: second bspwm did not refuse the live socket"
+			FAIL=$((FAIL + 1)); kill "$SECOND_PID" 2>/dev/null || true
+		else
+			printf "%b\n" "  ${GREEN}PASS${NC}: second bspwm refuses the live socket"
+			PASS=$((PASS + 1))
+		fi
+		TESTS_RUN=$((TESTS_RUN + 1))
+		assert_ok "live socket survives the second instance" $BSPC query -M
+		kill "$XVFB2_PID" 2>/dev/null || true
+	else
+		printf "%b\n" "  ${YELLOW}SKIP${NC}: socket clobber test (socket path not found)"
+	fi
+fi
+
 echo ""
 echo "== Desktop operations =="
 

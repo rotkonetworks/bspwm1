@@ -272,6 +272,28 @@ int main(int argc, char *argv[])
 			err("Couldn't create the socket.\n");
 		}
 
+		/* Never clobber a *live* bspwm's socket. The unlink below would
+		 * otherwise remove the running WM's socket file if this instance
+		 * resolved the same path — e.g. a nested or test bspwm on another
+		 * display that inherited this BSPWM_SOCKET and so got past the
+		 * "another WM is running" check. The victim keeps listening on a
+		 * now-nameless inode and every bspc/keybind silently fails until it
+		 * is restarted. If the path already names a socket we can connect to,
+		 * a bspwm is alive there; refuse instead of destroying it. On our own
+		 * restart the inherited socket was just closed above, so nothing is
+		 * listening and this probe passes. */
+		{
+			int probe = socket(AF_UNIX, SOCK_STREAM, 0);
+			if (probe != -1) {
+				bool alive = connect(probe, (struct sockaddr *) &sock_address,
+				                     sizeof(sock_address)) == 0;
+				close(probe);
+				if (alive) {
+					err("A bspwm is already listening on %s.\n", socket_path);
+				}
+			}
+		}
+
 		unlink(socket_path);
 
 		if (bind(sock_fd, (struct sockaddr *) &sock_address, sizeof(sock_address)) == -1) {
