@@ -49,7 +49,7 @@ all: format string fixes (upstream used only literal formats), `make_desktop`
 the binary-search midpoint (no such code upstream), `free_node` zeroing as a
 use-after-free fix, struct reordering removing padding (padding grew), and
 the animation cleanup-order entry (code since removed). The real fixes are
-listed in README.md under "hardening".
+listed in README.md under "fixes to upstream behaviour".
 
 # v1.6.4
 
