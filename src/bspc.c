@@ -233,6 +233,12 @@ int main(int argc, char *argv[])
 		msg_size += arg_len;
 	}
 
+	if (msg_size > IPC_MAX_MSG) {
+		free(msg);
+		close(sock_fd);
+		err("Message too long (max %d bytes).\n", IPC_MAX_MSG);
+	}
+
 	ssize_t sent = 0;
 	while (sent < (ssize_t)msg_size) {
 		ssize_t n = send(sock_fd, msg + sent, msg_size - sent, MSG_NOSIGNAL);
@@ -246,6 +252,9 @@ int main(int argc, char *argv[])
 	}
 
 	free(msg);
+
+	/* Tell bspwm the request is complete. */
+	shutdown(sock_fd, SHUT_WR);
 
 	int ret = EXIT_SUCCESS, nb;
 

@@ -36,4 +36,7 @@
 
 #define FAILURE_MESSAGE  "\x07"
 
+/* Largest request bspwm accepts on the control socket; bspc refuses to send more. */
+#define IPC_MAX_MSG  (1024 * 1024)
+
 #endif

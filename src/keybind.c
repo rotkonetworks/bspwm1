@@ -165,9 +165,7 @@ static bool has_shell_meta(const char *s)
 /* Fast path for `bspc ...` bindings: instead of fork -> sh -> bspc -> connect to
  * our own control socket -> reply -> teardown (a few ms per keypress), tokenize
  * the command and dispatch it in-process, exactly as if bspc had sent it over
- * the socket. Returns true when handled; false means "fall back to fork+sh".
- * Safe to call from the event path: nothing there holds a live scratch
- * allocation, so scratch_reset() here frees only what we allocated. */
+ * the socket. Returns true when handled; false means "fall back to fork+sh". */
 static bool keybind_exec_inproc(const char *command)
 {
 #ifdef BACKEND_X11
@@ -189,9 +187,9 @@ static bool keybind_exec_inproc(const char *command)
 	if (has_shell_meta(command)) return false;
 
 	const char *rest = command + 4;
+	char buf[MAX_COMMAND];
 	size_t len = strlen(rest);
-	char *buf = scratch_alloc(len + 1);
-	if (buf == NULL) return false;
+	if (len >= sizeof(buf)) return false;
 	memcpy(buf, rest, len + 1);
 
 	#define KB_MAX_ARGS 64
@@ -200,14 +198,14 @@ static bool keybind_exec_inproc(const char *command)
 	for (char *p = buf; *p != '\0'; ) {
 		while (*p == ' ' || *p == '\t') *p++ = '\0';
 		if (*p == '\0') break;
-		if (argc >= KB_MAX_ARGS) { scratch_reset(); return false; }
+		if (argc >= KB_MAX_ARGS) return false;
 		argv[argc++] = p;
 		while (*p != '\0' && *p != ' ' && *p != '\t') p++;
 	}
-	if (argc < 1) { scratch_reset(); return false; }
+	if (argc < 1) return false;
 
 	/* `subscribe` would keep the reply stream alive as a dead subscriber. */
-	if (streq(argv[0], "subscribe")) { scratch_reset(); return false; }
+	if (streq(argv[0], "subscribe")) return false;
 
 	/* Route the reply to our stderr (as the real bspc's output would end up on
 	 * the WM's inherited stderr), so a failing binding is not silent. Use a
@@ -227,11 +225,10 @@ static bool keybind_exec_inproc(const char *command)
 	if (rsp == NULL) {
 		if (efd >= 0) close(efd);
 		rsp = fopen("/dev/null", "w");
-		if (rsp == NULL) { scratch_reset(); return false; }
+		if (rsp == NULL) return false;
 	}
 
 	process_message(argv, argc, rsp); /* consumes (fcloses) rsp */
-	scratch_reset();
 	return true;
 	#undef KB_MAX_ARGS
 }

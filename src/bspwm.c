@@ -52,6 +52,7 @@
 #include "restore.h"
 #include "query.h"
 #include "keybind.h"
+#include "ipc.h"
 #include "bspwm.h"
 
 #ifdef BACKEND_X11
@@ -137,9 +138,7 @@ int main(int argc, char *argv[])
 	char state_path[MAXLEN] = {0};
 	int run_level = 0;
 	config_path[0] = '\0';
-	int cli_fd, n;
 	struct sockaddr_un sock_address;
-	char msg[BUFSIZ] = {0};
 	char *end;
 	int opt;
 	bool cli_ignore_monitor_updates = false;
@@ -349,12 +348,14 @@ int main(int argc, char *argv[])
 
 		backend_flush();
 
-		int nfds = epoll_wait(epoll_fd, ep_events, MAX_EPOLL_EVENTS, -1);
+		int nfds = epoll_wait(epoll_fd, ep_events, MAX_EPOLL_EVENTS, ipc_timeout());
 		if (nfds == -1) {
 			if (errno == EINTR)
 				continue;
 			break;
 		}
+
+		ipc_expire();
 
 		for (int i = 0; i < nfds; i++) {
 			int fd = ep_events[i].data.fd;
@@ -380,38 +381,9 @@ int main(int argc, char *argv[])
 				continue;
 
 			if (fd == sock_fd) {
-				cli_fd = accept(sock_fd, NULL, 0);
-				if (cli_fd > 0) {
-					struct ucred cred;
-					socklen_t len = sizeof(cred);
-					if (getsockopt(cli_fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == -1 ||
-					    cred.uid != getuid()) {
-						close(cli_fd);
-						continue;
-					}
-					/* Bound both directions: a client that connects and never
-					 * sends, or never reads its reply, must not hang the single
-					 * event loop. A real bspc exchange completes in microseconds. */
-					struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
-					setsockopt(cli_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-					setsockopt(cli_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-				}
-				if (cli_fd > 0) {
-					n = recv(cli_fd, msg, sizeof(msg)-1, 0);
-					if (n > 0) {
-						msg[n] = '\0';
-						FILE *rsp = fdopen(cli_fd, "w");
-						if (rsp != NULL) {
-							handle_message(msg, n, rsp);
-							scratch_reset();
-						} else {
-							warn("Can't open the client socket as file.\n");
-							close(cli_fd);
-						}
-					} else {
-						close(cli_fd);
-					}
-				}
+				ipc_accept(sock_fd);
+			} else if (ipc_handle(fd)) {
+				continue;
 			} else if (fd == dpy_fd) {
 #ifdef BACKEND_X11
 				xcb_generic_event_t *event;
@@ -493,8 +465,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	ipc_close_all();
 	cleanup();
-	scratch_destroy();
 	ungrab_buttons();
 	backend_destroy_window(meta_window);
 	backend_destroy_window(motion_recorder.id);
@@ -563,7 +535,6 @@ void init(void)
 void setup(void)
 {
 	init();
-	scratch_init();
 	keybind_init();
 
 #ifdef BACKEND_X11

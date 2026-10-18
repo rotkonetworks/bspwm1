@@ -48,41 +48,36 @@
 
 void handle_message(char *msg, int msg_len, FILE *rsp)
 {
-	/*
-	 * Use scratch arena for args - no need to free on error paths.
-	 * scratch_reset() is called after handle_message() returns.
-	 * Pre-allocate 256 slots (2KB) - enough for any reasonable command.
-	 */
-	#define MAX_ARGS 256
-	int num = 0;
-	char **args = scratch_alloc(MAX_ARGS * sizeof(char *));
-
-	if (args == NULL) {
-		perror("Handle message: scratch_alloc");
-		fclose(rsp);
-		return;
-	}
-
-	for (int i = 0, j = 0; i < msg_len; i++) {
+	int cap = 0;
+	for (int i = 0; i < msg_len; i++) {
 		if (msg[i] == 0) {
-			if (num >= MAX_ARGS) {
-				fail(rsp, "Too many arguments.\n");
-				fclose(rsp);
-				return;
-			}
-			args[num++] = msg + j;
-			j = i + 1;
+			cap++;
 		}
 	}
 
-	if (num < 1) {
+	if (cap < 1) {
 		fail(rsp, "No arguments given.\n");
 		fclose(rsp);
 		return;
 	}
 
+	char **args = malloc(cap * sizeof(char *));
+	if (args == NULL) {
+		perror("Handle message: malloc");
+		fclose(rsp);
+		return;
+	}
+
+	int num = 0;
+	for (int i = 0, j = 0; i < msg_len; i++) {
+		if (msg[i] == 0) {
+			args[num++] = msg + j;
+			j = i + 1;
+		}
+	}
+
 	process_message(args, num, rsp);
-	/* No free needed - scratch_reset() called after this function */
+	free(args);
 }
 
 typedef struct {
@@ -464,19 +459,19 @@ void cmd_node(char **args, int num, FILE *rsp)
 				break;
 			}
 			int dx = 0, dy = 0;
-			if (sscanf(*args, "%i", &dx) == 1) {
+			if (parse_int(*args, INT16_MIN, INT16_MAX, &dx)) {
 				num--, args++;
-				if (sscanf(*args, "%i", &dy) == 1) {
+				if (parse_int(*args, INT16_MIN, INT16_MAX, &dy)) {
 					if (!move_client(&trg, dx, dy)) {
 						fail(rsp, "%s", "");
 						break;
 					}
 				} else {
-					fail(rsp, "node %s: Invalid dy argument: '%s'.\n", *(args - 3), *args);
+					fail(rsp, "node %s: Invalid dy argument: '%s'.\n", *(args - 2), *args);
 					break;
 				}
 			} else {
-				fail(rsp, "node %s: Invalid dx argument: '%s'.\n", *(args - 2), *args);
+				fail(rsp, "node %s: Invalid dx argument: '%s'.\n", *(args - 1), *args);
 				break;
 			}
 		} else if (streq("-z", *args) || streq("--resize", *args)) {
@@ -489,9 +484,9 @@ void cmd_node(char **args, int num, FILE *rsp)
 			if (parse_resize_handle(*args, &rh)) {
 				num--, args++;
 				int dx = 0, dy = 0;
-				if (sscanf(*args, "%i", &dx) == 1) {
+				if (parse_int(*args, INT16_MIN, INT16_MAX, &dx)) {
 					num--, args++;
-					if (sscanf(*args, "%i", &dy) == 1) {
+					if (parse_int(*args, INT16_MIN, INT16_MAX, &dy)) {
 						if (!resize_client(&trg, rh, dx, dy, true)) {
 							fail(rsp, "node -z %s: no fence on that side to resize (the window edge is a screen border; resize the opposite edge instead).\n", *(args - 2));
 							break;
@@ -1053,9 +1048,9 @@ void cmd_query(char **args, int num, FILE *rsp)
 	coordinates_t desktop_ref = {mon, mon->desk, NULL};
 	coordinates_t node_ref = {mon, mon->desk, mon->desk->focus};
 	coordinates_t trg = {NULL, NULL, NULL};
-	monitor_select_t *monitor_sel = NULL;
-	desktop_select_t *desktop_sel = NULL;
-	node_select_t *node_sel = NULL;
+	monitor_select_t monitor_sel_buf, *monitor_sel = NULL;
+	desktop_select_t desktop_sel_buf, *desktop_sel = NULL;
+	node_select_t node_sel_buf, *node_sel = NULL;
 	domain_t dom = DOMAIN_TREE;
 	bool print_ids = true;
 	uint8_t d = 0;
@@ -1104,15 +1099,13 @@ void cmd_query(char **args, int num, FILE *rsp)
 				num--, args++;
 				int ret;
 				if ((*args)[0] == '.') {
-					/* Scratch arena - no free needed, reset after command */
-					monitor_sel = scratch_alloc(sizeof(monitor_select_t));
-					if (monitor_sel == NULL) goto end;
-					*monitor_sel = make_monitor_select();
-					size_t desc_len = strlen(*args);
-					char *desc = scratch_alloc(desc_len + 1);
+					monitor_sel_buf = make_monitor_select();
+					monitor_sel = &monitor_sel_buf;
+					char *desc = copy_string(*args, strlen(*args));
 					if (desc == NULL) goto end;
-					memcpy(desc, *args, desc_len + 1);
-					if (!parse_monitor_modifiers(desc, monitor_sel)) {
+					bool ok = parse_monitor_modifiers(desc, monitor_sel);
+					free(desc);
+					if (!ok) {
 						handle_failure(SELECTOR_BAD_MODIFIERS, "query -m", *args, rsp);
 						goto end;
 					}
@@ -1128,15 +1121,13 @@ void cmd_query(char **args, int num, FILE *rsp)
 				num--, args++;
 				int ret;
 				if ((*args)[0] == '.') {
-					/* Scratch arena - no free needed, reset after command */
-					desktop_sel = scratch_alloc(sizeof(desktop_select_t));
-					if (desktop_sel == NULL) goto end;
-					*desktop_sel = make_desktop_select();
-					size_t desc_len = strlen(*args);
-					char *desc = scratch_alloc(desc_len + 1);
+					desktop_sel_buf = make_desktop_select();
+					desktop_sel = &desktop_sel_buf;
+					char *desc = copy_string(*args, strlen(*args));
 					if (desc == NULL) goto end;
-					memcpy(desc, *args, desc_len + 1);
-					if (!parse_desktop_modifiers(desc, desktop_sel)) {
+					bool ok = parse_desktop_modifiers(desc, desktop_sel);
+					free(desc);
+					if (!ok) {
 						handle_failure(SELECTOR_BAD_MODIFIERS, "query -d", *args, rsp);
 						goto end;
 					}
@@ -1152,15 +1143,13 @@ void cmd_query(char **args, int num, FILE *rsp)
 				num--, args++;
 				int ret;
 				if ((*args)[0] == '.') {
-					/* Scratch arena - no free needed, reset after command */
-					node_sel = scratch_alloc(sizeof(node_select_t));
-					if (node_sel == NULL) goto end;
-					*node_sel = make_node_select();
-					size_t desc_len = strlen(*args);
-					char *desc = scratch_alloc(desc_len + 1);
+					node_sel_buf = make_node_select();
+					node_sel = &node_sel_buf;
+					char *desc = copy_string(*args, strlen(*args));
 					if (desc == NULL) goto end;
-					memcpy(desc, *args, desc_len + 1);
-					if (!parse_node_modifiers(desc, node_sel)) {
+					bool ok = parse_node_modifiers(desc, node_sel);
+					free(desc);
+					if (!ok) {
 						handle_failure(SELECTOR_BAD_MODIFIERS, "query -n", *args, rsp);
 						goto end;
 					}
@@ -1234,7 +1223,6 @@ void cmd_query(char **args, int num, FILE *rsp)
 	}
 
 end:
-	/* Scratch arena handles cleanup via scratch_reset() after handle_message() */
 	return;
 }
 
@@ -1747,7 +1735,7 @@ free_fifo_path:
 
 void cmd_quit(char **args, int num, FILE *rsp)
 {
-	if (num > 0 && sscanf(*args, "%i", &exit_status) != 1) {
+	if (num > 0 && !parse_int(*args, 0, 255, &exit_status)) {
 		fail(rsp, "%s: Invalid argument: '%s'.\n", *(args - 1), *args);
 		return;
 	}
@@ -1860,8 +1848,8 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 			} \
 		}
 	if (streq("border_width", name)) {
-		unsigned int bw;
-		if (sscanf(value, "%u", &bw) != 1) {
+		int bw;
+		if (!parse_int(value, 0, INT16_MAX, &bw)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
@@ -1927,8 +1915,8 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 		}
 	} else if (streq("window_gap", name)) {
 		int wg;
-		if (sscanf(value, "%i", &wg) != 1) {
-			fail(rsp, "%s", "");
+		if (!parse_int(value, INT16_MIN, INT16_MAX, &wg)) {
+			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
 		SET_DEF_DEFMON_DESK(window_gap, wg)
@@ -1946,50 +1934,50 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 		}
 	} else if (streq("top_padding", name)) {
 		int tp;
-		if (sscanf(value, "%i", &tp) != 1) {
+		if (!parse_int(value, INT16_MIN, INT16_MAX, &tp)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
 		SET_DEF_MON_DESK(padding.top, tp)
 	} else if (streq("right_padding", name)) {
 		int rp;
-		if (sscanf(value, "%i", &rp) != 1) {
+		if (!parse_int(value, INT16_MIN, INT16_MAX, &rp)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
 		SET_DEF_MON_DESK(padding.right, rp)
 	} else if (streq("bottom_padding", name)) {
 		int bp;
-		if (sscanf(value, "%i", &bp) != 1) {
+		if (!parse_int(value, INT16_MIN, INT16_MAX, &bp)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
 		SET_DEF_MON_DESK(padding.bottom, bp)
 	} else if (streq("left_padding", name)) {
 		int lp;
-		if (sscanf(value, "%i", &lp) != 1) {
+		if (!parse_int(value, INT16_MIN, INT16_MAX, &lp)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
 		SET_DEF_MON_DESK(padding.left, lp)
 #undef SET_DEF_MON_DESK
 	} else if (streq("top_monocle_padding", name)) {
-		if (sscanf(value, "%i", &monocle_padding.top) != 1) {
+		if (!parse_int(value, INT16_MIN, INT16_MAX, &monocle_padding.top)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
 	} else if (streq("right_monocle_padding", name)) {
-		if (sscanf(value, "%i", &monocle_padding.right) != 1) {
+		if (!parse_int(value, INT16_MIN, INT16_MAX, &monocle_padding.right)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
 	} else if (streq("bottom_monocle_padding", name)) {
-		if (sscanf(value, "%i", &monocle_padding.bottom) != 1) {
+		if (!parse_int(value, INT16_MIN, INT16_MAX, &monocle_padding.bottom)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
 	} else if (streq("left_monocle_padding", name)) {
-		if (sscanf(value, "%i", &monocle_padding.left) != 1) {
+		if (!parse_int(value, INT16_MIN, INT16_MAX, &monocle_padding.left)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
@@ -2071,10 +2059,12 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 			return;
 		}
 	} else if (streq("pointer_motion_interval", name)) {
-		if (sscanf(value, "%u", &pointer_motion_interval) != 1) {
+		int pmi;
+		if (!parse_int(value, 0, 60000, &pmi)) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
 			return;
 		}
+		pointer_motion_interval = pmi;
 	} else if (streq("pointer_action1", name) ||
 	           streq("pointer_action2", name) ||
 	           streq("pointer_action3", name)) {

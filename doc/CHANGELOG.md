@@ -1,3 +1,34 @@
+# Unreleased
+
+### Fixed
+
+- **Requests over 8 KB were cut off** at a single `recv()`, and more than
+  256 arguments were refused. The control socket now reads requests without
+  blocking into a per-client buffer, up to 1 MiB. bspc marks the end of a
+  request with `shutdown(SHUT_WR)`; clients that don't (polybar, scripts) are
+  answered once a NUL-terminated request has been idle for 10 ms.
+- **A client that connected and sent nothing froze the WM** for up to 2 s per
+  connection. It is now dropped after 2 s without blocking anything.
+- **Numbers were parsed with `sscanf`**, which accepted `10abc`, wrapped
+  `border_width -1` and `pointer_motion_interval -1` to ~4 billion, and let
+  `node -v`/`-z` overflow 16-bit coordinates. They now must be integers in
+  range; ids above 32 bits are rejected instead of truncated; `quit` takes
+  0-255.
+- `node -v` named the wrong argument in its error messages (upstream bug).
+- `unsigned_subtract` evaluated its second argument twice, walking a subtree
+  twice for every sticky/urgent count update.
+
+### Removed
+
+- The 256 KiB scratch arena. It served four small allocations per command;
+  the `query` selectors are on the stack and keybind uses a fixed buffer.
+
+### Tests
+
+- Regression tests for the deep-tree restore, rectangles past x=32767, FIFO
+  state loading, monocle padding errors, out-of-range numbers, long requests,
+  stalled clients and clients that never half-close.
+
 # v1.7.4
 
 Audit of the fork's hardening claims against upstream `af3bd8b`, followed by

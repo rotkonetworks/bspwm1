@@ -270,11 +270,24 @@ bool parse_id(char *s, uint32_t *id)
    char *end;
    errno = 0;
    long v = strtol(s, &end, 0);
-   if (errno != 0 || *end != '\0' || v < 0) {
+   if (errno != 0 || *end != '\0' || v < 0 || v > UINT32_MAX) {
        return false;
    }
    *id = (uint32_t)v;
    return true;
+}
+
+/* The whole string must be an integer within [min, max]. */
+bool parse_int(const char *s, long min, long max, int *v)
+{
+	char *end;
+	errno = 0;
+	long l = strtol(s, &end, 0);
+	if (errno != 0 || end == s || *end != '\0' || l < min || l > max) {
+		return false;
+	}
+	*v = (int) l;
+	return true;
 }
 
 bool parse_bool_declaration(char *s, char **key, bool *value, alter_state_t *state)

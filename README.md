@@ -32,11 +32,14 @@ supports layer shell, Xwayland, ext-workspace-v1 (waybar desktops), wlr-output-m
   node names from the JSON token length, so a long name overflowed `char[256]`. names are now
   clamped and token indices bounds-checked. JSON nesting is capped at 1024. the file must be a
   regular file or FIFO owned by the caller, at most 1 MiB
-- **control socket**: a client that connected and sent nothing stalled the WM; sends and
-  receives now time out after 2 s. the socket is mode 0600 with a `SO_PEERCRED` uid check, and
-  bspwm won't take over a live instance's socket
-- **argument parsing**: `parse_degree` / `parse_rectangle` use range-checked `strtol` instead of
-  `atoi`/`%hu`. rules reject over-long consequences instead of truncating them
+- **control socket**: a client that connected and sent nothing stalled the WM. requests are now
+  read without blocking, so a stalled client is dropped after 2 s and blocks no one. requests
+  are no longer cut at 8 KB (up to 1 MiB). the socket is mode 0600 with a `SO_PEERCRED` uid
+  check, and bspwm won't take over a live instance's socket
+- **argument parsing**: numbers in commands and settings must be whole integers in range
+  (`window_gap 10abc`, `border_width -1`, ids above 32 bits are errors instead of being
+  truncated or wrapped). `parse_degree` / `parse_rectangle` are range-checked. rules reject
+  over-long consequences instead of truncating them
 - **allocation**: NULL checks where upstream used `calloc` results directly (node and client
   creation, ewmh, restart argv)
 - **geometry**: `rect_cmp` no longer truncates an unsigned area difference to `int`, and

@@ -277,54 +277,6 @@ bool is_hex_color(const char *color)
 	return true;
 }
 
-/*
- * Scratch arena implementation - simple bump allocator.
- * All allocations are 8-byte aligned for safety.
- */
-static scratch_arena_t scratch = {0};
-
-void scratch_init(void)
-{
-	if (scratch.base != NULL) return;
-	scratch.base = malloc(SCRATCH_ARENA_SIZE);
-	if (scratch.base) {
-		scratch.capacity = SCRATCH_ARENA_SIZE;
-		scratch.offset = 0;
-	}
-}
-
-void scratch_destroy(void)
-{
-	free(scratch.base);
-	scratch.base = NULL;
-	scratch.capacity = 0;
-	scratch.offset = 0;
-}
-
-void scratch_reset(void)
-{
-	scratch.offset = 0;
-}
-
-void *scratch_alloc(size_t size)
-{
-	if (!scratch.base || size == 0) return NULL;
-
-	/* 8-byte alignment */
-	size_t aligned = (size + 7) & ~(size_t)7;
-
-	if (scratch.offset + aligned > scratch.capacity) {
-		/* Arena exhausted - return NULL, don't malloc (would leak) */
-		warn("Scratch arena exhausted (%zu/%zu), returning NULL\n",
-		     scratch.offset, scratch.capacity);
-		return NULL;
-	}
-
-	void *ptr = scratch.base + scratch.offset;
-	scratch.offset += aligned;
-	return ptr;
-}
-
 char *tokenize_with_escape(struct tokenize_state *state, const char *s, char sep)
 {
 	if (s != NULL) {

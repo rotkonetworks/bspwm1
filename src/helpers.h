@@ -108,13 +108,15 @@ static inline __attribute__((warn_unused_result)) bool safe_double(size_t *val) 
 
 #define cleaned_mask(m)   (m & ~(num_lock | scroll_lock | caps_lock))
 #define streq(s1, s2)     (strcmp((s1), (s2)) == 0)
-#define unsigned_subtract(a, b)  \
-	do {                         \
-		if ((b) > (a)) {         \
-			(a) = 0;             \
-		} else {                 \
-			(a) -= (b);          \
-		}                        \
+/* b is evaluated once: callers pass tree walks like sticky_count(n). */
+#define unsigned_subtract(a, b)        \
+	do {                               \
+		typeof((a) - (b)) unsigned_sub_b = (b); \
+		if (unsigned_sub_b > (a)) {      \
+			(a) = 0;                     \
+		} else {                         \
+			(a) -= unsigned_sub_b;       \
+		}                                \
 	} while (false)
 
 
@@ -136,22 +138,5 @@ struct tokenize_state {
 };
 __attribute__((warn_unused_result)) char *tokenize_with_escape(struct tokenize_state *state, const char *s, char sep);
 
-/*
- * Scratch arena - bump allocator for temporary allocations.
- * Reset after each command cycle to "free" all at once.
- * Prevents leaks in complex parsing paths.
- */
-#define SCRATCH_ARENA_SIZE (256 * 1024)  /* 256KB - increased for safety */
-
-typedef struct {
-	char *base;
-	size_t offset;
-	size_t capacity;
-} scratch_arena_t;
-
-void scratch_init(void);
-void scratch_destroy(void);
-void scratch_reset(void);  /* "free" all allocations */
-__attribute__((warn_unused_result, malloc)) void *scratch_alloc(size_t size);
 
 #endif
