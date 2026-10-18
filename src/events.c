@@ -128,14 +128,10 @@ void configure_request(void *evt)
 		height = c->floating_rectangle.height;
 
 		if (e->value_mask & XCB_CONFIG_WINDOW_X) {
-			c->floating_rectangle.x = e->x;
-			if (c->border_width <= (unsigned)(INT16_MAX - c->floating_rectangle.x))
-				c->floating_rectangle.x -= c->border_width;
+			c->floating_rectangle.x = e->x - (int)c->border_width;
 		}
 		if (e->value_mask & XCB_CONFIG_WINDOW_Y) {
-			c->floating_rectangle.y = e->y;
-			if (c->border_width <= (unsigned)(INT16_MAX - c->floating_rectangle.y))
-				c->floating_rectangle.y -= c->border_width;
+			c->floating_rectangle.y = e->y - (int)c->border_width;
 		}
 		if (e->value_mask & XCB_CONFIG_WINDOW_WIDTH)
 			width = e->width;

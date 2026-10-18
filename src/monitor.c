@@ -40,8 +40,6 @@
 #include "monitor.h"
 
 #define MAX_MONITORS 256
-#define SAFE_ADD(a, b) ((b) > 0 && (a) > INT_MAX - (b) ? INT_MAX : (a) + (b))
-#define SAFE_SUB(a, b) ((b) > 0 && (a) < INT_MIN + (b) ? INT_MIN : (a) - (b))
 
 static inline void batch_ewmh_update(void)
 {
@@ -192,41 +190,29 @@ void adapt_geometry(bspwm_rect_t *rs, bspwm_rect_t *rd, node_t *n)
 		client_t *c = f->client;
 		bspwm_rect_t *cr = &c->floating_rectangle;
 
+		/* Clip the rectangle to fit into the monitor. Without this, the fitting
+		 * algorithm doesn't work as expected. This also conserves the
+		 * out-of-bounds regions */
 		int left_adjust = MAX((rs->x - cr->x), 0);
 		int top_adjust = MAX((rs->y - cr->y), 0);
 		int right_adjust = MAX((cr->x + cr->width) - (rs->x + rs->width), 0);
 		int bottom_adjust = MAX((cr->y + cr->height) - (rs->y + rs->height), 0);
+		int w = cr->width - (left_adjust + right_adjust);
+		int h = cr->height - (top_adjust + bottom_adjust);
 
-		cr->x = SAFE_ADD(cr->x, left_adjust);
-		cr->y = SAFE_ADD(cr->y, top_adjust);
-		cr->width = SAFE_SUB(cr->width, SAFE_ADD(left_adjust, right_adjust));
-		cr->height = SAFE_SUB(cr->height, SAFE_ADD(top_adjust, bottom_adjust));
+		int dx_s = cr->x + left_adjust - rs->x;
+		int dy_s = cr->y + top_adjust - rs->y;
 
-		if (cr->width <= 0) cr->width = 1;
-		if (cr->height <= 0) cr->height = 1;
+		int deno_x = rs->width - w;
+		int deno_y = rs->height - h;
 
-		int dx_s = SAFE_SUB(cr->x, rs->x);
-		int dy_s = SAFE_SUB(cr->y, rs->y);
+		/* 64-bit: dx_s * (rd->width - w) can exceed INT_MAX */
+		int dx_d = (deno_x == 0 ? 0 : (int64_t)dx_s * (rd->width - w) / deno_x);
+		int dy_d = (deno_y == 0 ? 0 : (int64_t)dy_s * (rd->height - h) / deno_y);
 
-		int deno_x = SAFE_SUB(rs->width, cr->width);
-		int deno_y = SAFE_SUB(rs->height, cr->height);
-
-		int dx_d = 0, dy_d = 0;
-
-		if (deno_x > 0 && rd->width > cr->width) {
-			int64_t nume_x = (int64_t)dx_s * (rd->width - cr->width);
-			dx_d = nume_x / deno_x;
-		}
-
-		if (deno_y > 0 && rd->height > cr->height) {
-			int64_t nume_y = (int64_t)dy_s * (rd->height - cr->height);
-			dy_d = nume_y / deno_y;
-		}
-
-		cr->width = SAFE_ADD(cr->width, SAFE_ADD(left_adjust, right_adjust));
-		cr->height = SAFE_ADD(cr->height, SAFE_ADD(top_adjust, bottom_adjust));
-		cr->x = SAFE_SUB(SAFE_ADD(rd->x, dx_d), left_adjust);
-		cr->y = SAFE_SUB(SAFE_ADD(rd->y, dy_d), top_adjust);
+		/* Translate and undo clipping */
+		cr->x = rd->x + dx_d - left_adjust;
+		cr->y = rd->y + dy_d - top_adjust;
 	}
 }
 

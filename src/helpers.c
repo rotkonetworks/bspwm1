@@ -183,30 +183,17 @@ char *read_string(const char *file_path, size_t *tlen)
 
 char *copy_string(char *str, size_t len)
 {
-    if (str == NULL || len == 0) {
-        return NULL;
-    }
-
-    if (len > MAX_STRING_SIZE) {
-        warn("String too large: %zu bytes (max: %d)\n", len, MAX_STRING_SIZE);
-        return NULL;
-    }
-
-    if (len + 1 < len) {
-        warn("Integer overflow in string allocation\n");
-        return NULL;
-    }
-
-    char *cpy = calloc(1, len + 1);
-    if (cpy == NULL) {
-        perror("Copy string: calloc");
-        return NULL;
-    }
-
-    memcpy(cpy, str, len);
-    cpy[len] = '\0';
-
-    return cpy;
+	if (str == NULL) {
+		return NULL;
+	}
+	char *cpy = calloc(1, len + 1);
+	if (cpy == NULL) {
+		perror("Copy string: calloc");
+		return NULL;
+	}
+	memcpy(cpy, str, len);
+	cpy[len] = '\0';
+	return cpy;
 }
 
 char *mktempfifo(const char *template)
@@ -340,48 +327,36 @@ void *scratch_alloc(size_t size)
 
 char *tokenize_with_escape(struct tokenize_state *state, const char *s, char sep)
 {
-    if (s != NULL) {
-        // first call
-        state->in_escape = false;
-        state->pos = s;
-        state->len = strlen(s) + 1;
+	if (s != NULL) {
+		// first call
+		state->in_escape = false;
+		state->pos = s;
+		state->len = strlen(s) + 1;
+	}
 
-        if (state->len > MAX_STRING_SIZE) {
-            return NULL;
-        }
-    }
+	char *outp = calloc(state->len, 1);
+	char *ret = outp;
+	if (!outp) return NULL;
 
-    if (state->len > MAX_STRING_SIZE) {
-        return NULL;
-    }
+	char cur;
+	while (*state->pos) {
+		--state->len;
+		cur = *state->pos++;
 
-    char *outp = calloc(state->len, 1);
-    if (!outp) return NULL;
+		if (state->in_escape) {
+			*outp++ = cur;
+			state->in_escape = false;
+			continue;
+		}
 
-    char *ret = outp;
-    char cur;
-    size_t out_len = 0;
-    size_t max_len = state->len - 1;
+		if (cur == '\\') {
+			state->in_escape = !state->in_escape;
+		} else if (cur == sep) {
+			return ret;
+		} else {
+			*outp++ = cur;
+		}
+	}
 
-    while (*state->pos && out_len < max_len) {
-        cur = *state->pos++;
-
-        if (state->in_escape) {
-            *outp++ = cur;
-            out_len++;
-            state->in_escape = false;
-            continue;
-        }
-
-        if (cur == '\\') {
-            state->in_escape = !state->in_escape;
-        } else if (cur == sep) {
-            return ret;
-        } else {
-            *outp++ = cur;
-            out_len++;
-        }
-    }
-
-    return ret;
+	return ret;
 }

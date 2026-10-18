@@ -81,17 +81,7 @@
 #define INIT_CAP    8
 #define MAX_STRING_SIZE (1024 * 1024)
 
-/* Overflow-safe allocation size calculation (Micay-style) */
-#define SIZE_MAX_HALF (SIZE_MAX / 2)
-
-/* Check if multiplication would overflow before allocating */
-static inline __attribute__((warn_unused_result)) void *safe_calloc(size_t nmemb, size_t size) {
-	if (nmemb && size > SIZE_MAX / nmemb) {
-		return NULL;  /* overflow */
-	}
-	return calloc(nmemb, size);
-}
-
+/* malloc/realloc for arrays, failing on nmemb * size overflow (cf. reallocarray) */
 static inline __attribute__((warn_unused_result)) void *safe_malloc_array(size_t nmemb, size_t size) {
 	if (nmemb && size > SIZE_MAX / nmemb) {
 		return NULL;  /* overflow */
@@ -108,7 +98,7 @@ static inline __attribute__((warn_unused_result)) void *safe_realloc_array(void 
 
 /* Safe doubling with overflow check */
 static inline __attribute__((warn_unused_result)) bool safe_double(size_t *val) {
-	if (*val > SIZE_MAX_HALF) {
+	if (*val > SIZE_MAX / 2) {
 		return false;  /* would overflow */
 	}
 	*val *= 2;

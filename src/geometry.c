@@ -29,96 +29,38 @@
 #include "settings.h"
 #include "geometry.h"
 
-#ifdef __SSE2__
-#include <emmintrin.h>
-#define HAVE_SSE2 1
-#endif
+/* Bottom-right corner, computed in int: x + width - 1 can exceed INT16_MAX. */
+typedef struct {
+	int x, y;
+} rect_max_t;
 
-#ifdef __SSE4_1__
-#include <smmintrin.h>
-#define HAVE_SSE41 1
-#endif
-
-/*
- * Batch is_inside check - test point against 2 rectangles simultaneously
- * Returns bitmask: bit 0 = inside rect[0], bit 1 = inside rect[1]
- */
-#ifdef HAVE_SSE2
-int is_inside_batch2(bspwm_point_t p, const bspwm_rect_t rects[2])
+static inline rect_max_t rect_max(bspwm_rect_t r)
 {
-	/* Load point as {px, py, px, py} */
-	__m128i point = _mm_set_epi32(p.y, p.x, p.y, p.x);
-
-	/* Load rect mins as {r0.x, r0.y, r1.x, r1.y} */
-	__m128i mins = _mm_set_epi32(rects[1].y, rects[1].x, rects[0].y, rects[0].x);
-
-	/* Load rect maxs as {r0.x+w, r0.y+h, r1.x+w, r1.y+h} */
-	__m128i maxs = _mm_set_epi32(
-		rects[1].y + rects[1].height,
-		rects[1].x + rects[1].width,
-		rects[0].y + rects[0].height,
-		rects[0].x + rects[0].width
-	);
-
-	/* point >= mins AND point < maxs */
-	__m128i ge_min = _mm_cmpgt_epi32(point, _mm_sub_epi32(mins, _mm_set1_epi32(1)));
-	__m128i lt_max = _mm_cmplt_epi32(point, maxs);
-	__m128i inside = _mm_and_si128(ge_min, lt_max);
-
-	/* Extract results - need both x and y conditions true */
-	int mask = _mm_movemask_ps(_mm_castsi128_ps(inside));
-	int r0 = (mask & 0x3) == 0x3 ? 1 : 0;  /* bits 0,1 both set */
-	int r1 = (mask & 0xC) == 0xC ? 2 : 0;  /* bits 2,3 both set */
-	return r0 | r1;
-}
-#endif
-
-static inline bool valid_rect(bspwm_rect_t r)
-{
-	return r.width > 0 && r.height > 0 &&
-	       r.x <= INT16_MAX - r.width &&
-	       r.y <= INT16_MAX - r.height;
-}
-
-static inline bspwm_point_t rect_max(bspwm_rect_t r)
-{
-	return (bspwm_point_t){r.x + r.width - 1, r.y + r.height - 1};
+	return (rect_max_t){r.x + r.width - 1, r.y + r.height - 1};
 }
 
 bool is_inside(bspwm_point_t p, bspwm_rect_t r)
 {
-	if (!valid_rect(r))
-		return false;
 	return p.x >= r.x && p.x < r.x + r.width &&
 	       p.y >= r.y && p.y < r.y + r.height;
 }
 
+/* Returns true if a contains b */
 bool contains(bspwm_rect_t a, bspwm_rect_t b)
 {
-	if (!valid_rect(a) || !valid_rect(b))
-		return false;
-	bspwm_point_t b_max = rect_max(b);
-	return a.x <= b.x && a.y <= b.y &&
-	       a.x + a.width >= b_max.x + 1 &&
-	       a.y + a.height >= b_max.y + 1;
+	return a.x <= b.x && a.x + a.width >= b.x + b.width &&
+	       a.y <= b.y && a.y + a.height >= b.y + b.height;
 }
 
 unsigned int area(bspwm_rect_t r)
 {
-	if (!valid_rect(r))
-		return 0;
-	if (r.width > UINT_MAX / r.height)
-		return UINT_MAX;
-	return r.width * r.height;
+	return (unsigned int)r.width * r.height;
 }
 
 uint32_t boundary_distance(bspwm_rect_t r1, bspwm_rect_t r2, direction_t dir)
 {
-	if (!valid_rect(r1) || !valid_rect(r2))
-		return UINT32_MAX;
-
-	bspwm_point_t r1_max = rect_max(r1);
-	bspwm_point_t r2_max = rect_max(r2);
+	rect_max_t r1_max = rect_max(r1);
+	rect_max_t r2_max = rect_max(r2);
 
 	switch (dir) {
 		case DIR_NORTH:
@@ -136,11 +78,8 @@ uint32_t boundary_distance(bspwm_rect_t r1, bspwm_rect_t r2, direction_t dir)
 
 bool on_dir_side(bspwm_rect_t r1, bspwm_rect_t r2, direction_t dir)
 {
-	if (!valid_rect(r1) || !valid_rect(r2))
-		return false;
-
-	bspwm_point_t r1_max = rect_max(r1);
-	bspwm_point_t r2_max = rect_max(r2);
+	rect_max_t r1_max = rect_max(r1);
+	rect_max_t r2_max = rect_max(r2);
 
 	/* Check if r2 is on the correct side */
 	switch (directional_focus_tightness) {
@@ -209,9 +148,6 @@ bool rect_eq(bspwm_rect_t a, bspwm_rect_t b)
 
 int rect_cmp(bspwm_rect_t r1, bspwm_rect_t r2)
 {
-	if (!valid_rect(r1) || !valid_rect(r2))
-		return 0;
-
 	if (r1.y >= r2.y + r2.height)
 		return 1;
 	if (r2.y >= r1.y + r1.height)

@@ -65,12 +65,6 @@ void handle_message(char *msg, int msg_len, FILE *rsp)
 
 	for (int i = 0, j = 0; i < msg_len; i++) {
 		if (msg[i] == 0) {
-			if (j >= msg_len) {
-				/* No free needed - scratch_reset handles it */
-				perror("Handle message: buffer overflow");
-				fclose(rsp);
-				return;
-			}
 			if (num >= MAX_ARGS) {
 				fail(rsp, "Too many arguments.\n");
 				fclose(rsp);

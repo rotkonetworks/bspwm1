@@ -35,9 +35,4 @@ bool on_dir_side(bspwm_rect_t r1, bspwm_rect_t r2, direction_t dir);
 bool rect_eq(bspwm_rect_t a, bspwm_rect_t b);
 int rect_cmp(bspwm_rect_t r1, bspwm_rect_t r2);
 
-/* SIMD batch operations - check 2 rectangles at once */
-#ifdef __SSE2__
-int is_inside_batch2(bspwm_point_t p, const bspwm_rect_t rects[2]);
-#endif
-
 #endif

@@ -20,7 +20,7 @@ bool parse_##name(char *s, type *v) { \
     if (!s || !v) return false; \
     int left = 0, right = (sizeof(name##_table)/sizeof(name##_table[0])) - 1; \
     while (left <= right) { \
-        int mid = left + ((right - left) >> 1); /* Avoid overflow */ \
+        int mid = (left + right) >> 1; \
         int cmp = strcmp(s, name##_table[mid].key); \
         if (cmp == 0) { \
             *v = name##_table[mid].value; \

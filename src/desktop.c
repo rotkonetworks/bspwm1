@@ -231,13 +231,7 @@ desktop_t *make_desktop(const char *name, uint32_t id)
 	if (!d)
 		return NULL;
 		
-	if (name && *name) {
-		strncpy(d->name, name, sizeof(d->name) - 1);
-		d->name[sizeof(d->name) - 1] = '\0';
-	} else {
-		strncpy(d->name, DEFAULT_DESK_NAME, sizeof(d->name) - 1);
-		d->name[sizeof(d->name) - 1] = '\0';
-	}
+	snprintf(d->name, sizeof(d->name), "%s", name == NULL ? DEFAULT_DESK_NAME : name);
 	
 	d->id = (id == BSPWM_WID_NONE) ? ++id_counter : id;
 	d->prev = d->next = NULL;
@@ -261,8 +255,7 @@ void rename_desktop(monitor_t *m, desktop_t *d, const char *name)
 	put_status(SBSC_MASK_DESKTOP_RENAME, "desktop_rename 0x%08X 0x%08X %s %s\n", 
 	          m->id, d->id, d->name, name);
 	          
-	strncpy(d->name, name, sizeof(d->name) - 1);
-	d->name[sizeof(d->name) - 1] = '\0';
+	snprintf(d->name, sizeof(d->name), "%s", name);
 	
 	put_status(SBSC_MASK_REPORT);
 	ewmh_update_desktop_names();
