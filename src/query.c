@@ -35,8 +35,6 @@
 #include "query.h"
 #include "geometry.h"
 
-#define MAX_RECURSION_DEPTH 1000
-
 static query_buffer_t buffer_pool[4] = {0};
 
 query_buffer_t *get_query_buffer(void)
@@ -54,10 +52,6 @@ void release_query_buffer(query_buffer_t *buf)
 {
 	if (buf) buf->in_use = false;
 }
-
-static void query_node_depth(node_t *n, FILE *rsp, int depth);
-static int query_node_ids_in_depth(node_t *n, desktop_t *d, monitor_t *m, coordinates_t *ref,
-                                   coordinates_t *trg, node_select_t *sel, FILE *rsp, int depth);
 
 void query_state(FILE *rsp)
 {
@@ -139,14 +133,13 @@ void query_desktop(desktop_t *d, FILE *rsp)
 	query_padding(d->padding, rsp);
 	fprintf(rsp,",");
 	fprintf(rsp, "\"root\":");
-	query_node_depth(d->root, rsp, 0);
+	query_node(d->root, rsp);
 	fprintf(rsp, "}");
 }
 
-static void query_node_depth(node_t *n, FILE *rsp, int depth)
+void query_node(node_t *n, FILE *rsp)
 {
-	if (depth > MAX_RECURSION_DEPTH || !rsp) {
-		fprintf(rsp, "null");
+	if (!rsp) {
 		return;
 	}
 	
@@ -173,20 +166,15 @@ static void query_node_depth(node_t *n, FILE *rsp, int depth)
 		query_constraints(n->constraints, rsp);
 		fprintf(rsp,",");
 		fprintf(rsp, "\"firstChild\":");
-		query_node_depth(n->first_child, rsp, depth + 1);
+		query_node(n->first_child, rsp);
 		fprintf(rsp,",");
 		fprintf(rsp, "\"secondChild\":");
-		query_node_depth(n->second_child, rsp, depth + 1);
+		query_node(n->second_child, rsp);
 		fprintf(rsp,",");
 		fprintf(rsp, "\"client\":");
 		query_client(n->client, rsp);
 		fprintf(rsp, "}");
 	}
-}
-
-void query_node(node_t *n, FILE *rsp)
-{
-	query_node_depth(n, rsp, 0);
 }
 
 void query_presel(presel_t *p, FILE *rsp)
@@ -321,16 +309,16 @@ int query_node_ids(coordinates_t *mon_ref, coordinates_t *desk_ref, coordinates_
 			    (desk_sel && !desktop_matches(&loc, desk_ref, desk_sel))) {
 				continue;
 			}
-			count += query_node_ids_in_depth(d->root, d, m, ref, trg, sel, rsp, 0);
+			count += query_node_ids_in(d->root, d, m, ref, trg, sel, rsp);
 		}
 	}
 	return count;
 }
 
-static int query_node_ids_in_depth(node_t *n, desktop_t *d, monitor_t *m, coordinates_t *ref,
-                                   coordinates_t *trg, node_select_t *sel, FILE *rsp, int depth)
+int query_node_ids_in(node_t *n, desktop_t *d, monitor_t *m, coordinates_t *ref,
+                      coordinates_t *trg, node_select_t *sel, FILE *rsp)
 {
-	if (depth > MAX_RECURSION_DEPTH || !n || !rsp)
+	if (!n || !rsp)
 		return 0;
 		
 	int count = 0;
@@ -340,16 +328,10 @@ static int query_node_ids_in_depth(node_t *n, desktop_t *d, monitor_t *m, coordi
 		fprintf(rsp, "0x%08X\n", n->id);
 		count++;
 	}
-	count += query_node_ids_in_depth(n->first_child, d, m, ref, trg, sel, rsp, depth + 1);
-	count += query_node_ids_in_depth(n->second_child, d, m, ref, trg, sel, rsp, depth + 1);
+	count += query_node_ids_in(n->first_child, d, m, ref, trg, sel, rsp);
+	count += query_node_ids_in(n->second_child, d, m, ref, trg, sel, rsp);
 	
 	return count;
-}
-
-int query_node_ids_in(node_t *n, desktop_t *d, monitor_t *m, coordinates_t *ref,
-                      coordinates_t *trg, node_select_t *sel, FILE *rsp)
-{
-	return query_node_ids_in_depth(n, d, m, ref, trg, sel, rsp, 0);
 }
 
 int query_desktop_ids(coordinates_t* mon_ref, coordinates_t *ref, coordinates_t *trg,

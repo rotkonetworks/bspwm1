@@ -29,8 +29,6 @@
 #include "tree.h"
 #include "stack.h"
 
-#define MAX_STACK_DEPTH 1000
-
 stacking_list_t *make_stack(node_t *n)
 {
 	if (!n)
@@ -236,8 +234,6 @@ void stack(desktop_t *d, node_t *n, bool focused)
 	restack_presel_feedbacks(d);
 }
 
-static void restack_presel_feedbacks_in_depth(node_t *r, node_t *n, int depth);
-
 void restack_presel_feedbacks(desktop_t *d)
 {
 	if (!d)
@@ -249,22 +245,17 @@ void restack_presel_feedbacks(desktop_t *d)
 	}
 	
 	if (s && s->node)
-		restack_presel_feedbacks_in_depth(d->root, s->node, 0);
+		restack_presel_feedbacks_in(d->root, s->node);
 }
 
-static void restack_presel_feedbacks_in_depth(node_t *r, node_t *n, int depth)
+void restack_presel_feedbacks_in(node_t *r, node_t *n)
 {
-	if (!r || !n || depth > MAX_STACK_DEPTH)
+	if (!r || !n)
 		return;
 		
 	if (r->presel)
 		window_above(r->presel->feedback, n->id);
 		
-	restack_presel_feedbacks_in_depth(r->first_child, n, depth + 1);
-	restack_presel_feedbacks_in_depth(r->second_child, n, depth + 1);
-}
-
-void restack_presel_feedbacks_in(node_t *r, node_t *n)
-{
-	restack_presel_feedbacks_in_depth(r, n, 0);
+	restack_presel_feedbacks_in(r->first_child, n);
+	restack_presel_feedbacks_in(r->second_child, n);
 }
