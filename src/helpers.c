@@ -101,8 +101,8 @@ char *read_string(const char *file_path, size_t *tlen)
         return NULL;
     }
 
-    if (!S_ISREG(st.st_mode) || st.st_uid != getuid()) {
-        warn("Refusing to read '%s': not a regular file owned by uid %u.\n",
+    if ((!S_ISREG(st.st_mode) && !S_ISFIFO(st.st_mode)) || st.st_uid != getuid()) {
+        warn("Refusing to read '%s': not a regular file or FIFO owned by uid %u.\n",
              file_path, (unsigned) getuid());
         close(fd);
         return NULL;

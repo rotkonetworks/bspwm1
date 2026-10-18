@@ -1,4 +1,4 @@
-# Unreleased
+# v1.7.4
 
 Audit of the fork's hardening claims against upstream `af3bd8b`, followed by
 removal of the code that guarded nothing.
@@ -21,6 +21,12 @@ removal of the code that guarded nothing.
 - `area()` still overflowed signed `int` for 65535x65535; fixed with an
   unsigned operand.
 - `copy_string(s, 0)` returned NULL instead of `""`.
+- `bspc config *_monocle_padding <garbage>` reported an error but kept
+  going; it now returns like every other setting (inherited from upstream).
+- `bspc wm -l` accepts a FIFO again (still must be owned by the caller,
+  still capped at 1 MiB while reading).
+- Three allocations were dereferenced unchecked (ewmh connection, client
+  message event, rule rectangle).
 - Full RELRO: link with `-z relro -z now`. `make debug` uses `-Og`, so
   `_FORTIFY_SOURCE` stays active.
 

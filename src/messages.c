@@ -1976,18 +1976,22 @@ void set_setting(coordinates_t loc, char *name, char *value, FILE *rsp)
 	} else if (streq("top_monocle_padding", name)) {
 		if (sscanf(value, "%i", &monocle_padding.top) != 1) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
+			return;
 		}
 	} else if (streq("right_monocle_padding", name)) {
 		if (sscanf(value, "%i", &monocle_padding.right) != 1) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
+			return;
 		}
 	} else if (streq("bottom_monocle_padding", name)) {
 		if (sscanf(value, "%i", &monocle_padding.bottom) != 1) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
+			return;
 		}
 	} else if (streq("left_monocle_padding", name)) {
 		if (sscanf(value, "%i", &monocle_padding.left) != 1) {
 			fail(rsp, "config: %s: Invalid value: '%s'.\n", name, value);
+			return;
 		}
 #define SET_STR(s) \
 	} else if (streq(#s, name)) { \
