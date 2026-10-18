@@ -62,3 +62,5 @@ Thumbs.db
 *.pid
 core
 core.*
+tests/test_jsmn
+tests/test_geometry

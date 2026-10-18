@@ -519,6 +519,68 @@ done
 # ---- Quit ----
 
 echo ""
+echo "== Regressions =="
+
+# Invalid numbers are rejected and leave the setting alone.
+MP0=$($BSPC config top_monocle_padding 2>/dev/null)
+assert_fail "monocle padding rejects garbage" $BSPC config top_monocle_padding junk
+assert_eq "monocle padding unchanged after a bad value" "$MP0" "$($BSPC config top_monocle_padding 2>/dev/null)"
+assert_fail "border_width rejects negatives" $BSPC config border_width -1
+assert_fail "window_gap rejects out-of-range" $BSPC config window_gap 99999
+assert_fail "window_gap rejects trailing junk" $BSPC config window_gap 10abc
+assert_fail "pointer_motion_interval rejects negatives" $BSPC config pointer_motion_interval -1
+assert_fail "node -v rejects out-of-range" $BSPC node -v 99999 0
+assert_fail "ids above 32 bits are rejected" $BSPC query -N -n 0x1ffffffff
+assert_fail "quit rejects an exit status above 255" $BSPC quit 300
+assert_ok "bspwm still running after bad quit" kill -0 "$BSPWM_PID"
+
+# Requests larger than the old 8 KB single read arrive whole.
+LONG_NAMES=$(seq -f 'regression-desktop-%06g' 1 500)
+D_BEFORE=$($BSPC query -D | wc -l)
+assert_ok "500 desktops in one 13 KB request" $BSPC monitor -a $LONG_NAMES
+assert_eq "all 500 desktops were added" "$((D_BEFORE + 500))" "$($BSPC query -D | wc -l)"
+for d in $LONG_NAMES; do $BSPC desktop "$d" -r >/dev/null 2>&1; done
+assert_eq "long-request desktops removed" "$D_BEFORE" "$($BSPC query -D | wc -l)"
+
+# A client that connects and sends nothing must not block anyone else, and
+# a client that never shuts down its write side still gets an answer.
+if command -v python3 >/dev/null 2>&1; then
+	SOCK_PATH=$($BSPC --print-socket-path)
+	IPC_OUT=$(python3 -I - "$SOCK_PATH" "$BSPC" <<'PY'
+import socket, subprocess, sys, time
+path, bspc = sys.argv[1], sys.argv[2]
+stall = socket.socket(socket.AF_UNIX); stall.connect(path)
+t = time.time()
+ok = subprocess.run([bspc, "query", "-M"], capture_output=True).returncode == 0
+print("stall", "ok" if ok and time.time() - t < 1 else "blocked")
+s = socket.socket(socket.AF_UNIX); s.connect(path); s.sendall(b"query\0-M\0")
+s.settimeout(1); out = b""
+try:
+    while True:
+        d = s.recv(4096)
+        if not d: break
+        out += d
+except socket.timeout:
+    pass
+print("legacy", "ok" if out.strip() else "noreply")
+PY
+)
+	assert_eq "a stalled client does not block bspc" "stall ok" "$(echo "$IPC_OUT" | grep stall)"
+	assert_eq "a client without shutdown(SHUT_WR) gets a reply" "legacy ok" "$(echo "$IPC_OUT" | grep legacy)"
+fi
+
+# State loads from a FIFO.
+FIFO_DIR=$(mktemp -d)
+mkfifo "$FIFO_DIR/state"
+$BSPC wm -d > "$FIFO_DIR/dump"
+D_BEFORE=$($BSPC query -D | wc -l)
+cat "$FIFO_DIR/dump" > "$FIFO_DIR/state" &
+FEED_PID=$!
+assert_ok "wm -l reads state from a FIFO" $BSPC wm -l "$FIFO_DIR/state"
+wait "$FEED_PID"
+assert_eq "desktops intact after FIFO restore" "$D_BEFORE" "$($BSPC query -D | wc -l)"
+rm -rf "$FIFO_DIR"
+
 echo "== Shutdown =="
 assert_ok "bspc quit" $BSPC quit
 sleep 0.5
@@ -535,7 +597,7 @@ BSPWM_PID=""
 # ---- unit tests (backend-agnostic, no display needed) ----
 echo ""
 echo "== unit tests =="
-for unit in rule_match magnet; do
+for unit in rule_match magnet jsmn geometry; do
 	if [ -x "./test_$unit" ]; then
 		if "./test_$unit" > "/tmp/bspwm_${unit}_unit.$$" 2>&1; then
 			printf "%b\n" "  ${GREEN}PASS${NC}: $unit unit suite"
