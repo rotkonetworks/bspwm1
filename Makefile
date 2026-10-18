@@ -56,8 +56,8 @@ else
     $(error Unknown BACKEND=$(BACKEND). Use x11 or wlroots)
 endif
 
-LDFLAGS  ?=
-LDLIBS    = $(LDFLAGS) -lm $(BACKEND_LIBS)
+LDFLAGS  += -Wl,-z,relro,-z,now
+LDLIBS    = -lm $(BACKEND_LIBS)
 
 PREFIX    ?= /usr/local
 BINPREFIX ?= $(PREFIX)/bin
@@ -86,7 +86,7 @@ CLI_LIBS =
 
 all: $(WM_BIN) bspc
 
-debug: CFLAGS += -O0 -g
+debug: CFLAGS += -Og -g
 debug: $(WM_BIN) bspc
 
 $(PROTO_DIR)/%-protocol.h: $(WLR_PROTOCOLS_DIR)/unstable/%.xml

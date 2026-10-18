@@ -1,6 +1,6 @@
 # bspwm
 
-hardened fork of baskerville/bspwm. security fixes, memory safety improvements, reduced X11 latency.
+fork of baskerville/bspwm with an IPC and state-restore hardening pass, a wlroots backend and reduced X11 latency.
 
 ## overview
 
@@ -8,21 +8,39 @@ binary tree tiling window manager. socket IPC with bspc client. requires sxhkd f
 
 ## changes from upstream
 
-### security hardening
+### hardening
 
-- buffer overflow fixes with bounds checking
-- integer overflow protection on size calculations
-- safe memory allocation wrappers (NULL checks, overflow detection)
-- format string vulnerability fixes
-- input validation on all IPC commands
-- resource limits (tree depth, string sizes)
+fixes for issues reachable from input bspwm does not fully control:
 
-### memory safety
+- **state file restore** (`bspc wm -l`, `bspwm -r`): monitor/desktop/node name tokens
+  are clamped to their buffers (upstream sized the copy from the token length and could
+  overflow `char[256]`); token indices are bounds-checked; JSON nesting is capped at 1024;
+  the file must be a regular file owned by the caller, under 1 MiB, and is NUL-terminated.
+  the default state path is in `$XDG_RUNTIME_DIR`
+- **control socket**: mode 0600, `SO_PEERCRED` uid check, 2 s send/receive timeouts (upstream's
+  single-threaded loop could be stalled by a client that connects and sends nothing), and
+  refusal to replace a live bspwm's socket
+- **argument parsing**: `parse_degree`/`parse_rectangle` use range-checked `strtol` instead of
+  `atoi`/`%hu`; rules reject over-long consequences instead of truncating; at most 256 arguments
+  per message
+- **NULL checks on allocation** where upstream dereferenced `calloc` results directly
+  (node/client creation, ewmh, restart argv)
+- **geometry**: `rect_cmp` no longer truncates an unsigned area difference to `int`;
+  `adapt_geometry` uses 64-bit intermediates
 
-- scratch arena allocator for per-command temporary allocations
-- eliminates leak-prone manual free() on error paths
-- `__attribute__((cold))` on error handlers for better I-cache utilization
-- struct field reordering to eliminate padding holes
+the rest of the bounds checks in the fork guard code that was already correct upstream; they are
+not security fixes. upstream had no format string bugs (every format argument was a literal).
+
+### build
+
+- `-std=c23 -O2 -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fcf-protection`,
+  full RELRO (`-z relro -z now`), `-Wformat=2 -Wvla -Wnull-dereference` and friends, warning-free.
+  `-fcf-protection` only emits CET markers; enforcement depends on CPU and kernel
+
+### memory
+
+- small per-command scratch arena for the IPC argument vector and `query` selectors
+- `__attribute__((cold))` on `warn()`/`err()`
 
 ### X11 pipelining
 
@@ -39,7 +57,7 @@ command latency:         4 μs       4 μs
 window create+map:    1634 μs    1637 μs
 ```
 
-identical performance. security hardening adds no measurable overhead.
+single run against a bspwm 0.9.12 binary; it measures X11/IPC round-trips, not the hardened code paths.
 
 ## benchmarking
 

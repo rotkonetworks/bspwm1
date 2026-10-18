@@ -1,3 +1,50 @@
+# Unreleased
+
+Audit of the fork's hardening claims against upstream `af3bd8b`, followed by
+removal of the code that guarded nothing.
+
+### Fixed
+
+- **Deep layouts could be dumped but not restored.** The JSON nesting cap was
+  128, below the tree depth cap of 256, so `wm -l` / `bspwm -r` dropped the
+  whole layout. The cap is now 1024 and lives only in jsmn.
+- **Subtrees past depth 256 were silently skipped** by every "bounded"
+  recursive tree walk (freeing leaked them, counts undercounted). The
+  `MAX_TREE_DEPTH` caps are gone; depth is bounded by window count and
+  upstream's plain recursion is fine for any reachable tree.
+- **Windows past x/y 32767 were rejected** by `valid_rect()` in
+  `is_inside`/`contains`/`boundary_distance`/`on_dir_side`. Corners are now
+  computed in `int`.
+- **Floating windows moved to a smaller monitor were not rescaled**
+  (`adapt_geometry` regression); upstream behaviour restored with 64-bit
+  intermediates.
+- `area()` still overflowed signed `int` for 65535x65535; fixed with an
+  unsigned operand.
+- `copy_string(s, 0)` returned NULL instead of `""`.
+- Full RELRO: link with `-z relro -z now`. `make debug` uses `-Og`, so
+  `_FORTIFY_SOURCE` stays active.
+
+### Removed
+
+- `SAFE_ADD`/`SAFE_SUB` (int math on 16-bit fields cannot overflow;
+  `unsigned_subtract` kept where clamping at 0 matters), `safe_calloc`
+  (calloc already checks), `secure_memzero` before `free()` (does not stop a
+  dangling read), the unused SSE2 `is_inside_batch2` and `collect_leaves`,
+  an unreachable index check in `handle_message`, and the cosmetic jsmn
+  rewrite (back to upstream plus the depth cap).
+
+### Corrections to earlier entries
+
+These entries describe changes that fixed nothing reachable, or nothing at
+all: format string fixes (upstream used only literal formats), `make_desktop`
+/ `rename_desktop` (already bounded `snprintf`), `handle_message` j-index,
+`copy_string` / `tokenize_with_escape` / `parse_keys_values` /
+`remove_rule_by_cause` / `cmd_rule` overflows (inputs were already bounded),
+the binary-search midpoint (no such code upstream), `free_node` zeroing as a
+use-after-free fix, struct reordering removing padding (padding grew), and
+the animation cleanup-order entry (code since removed). The real fixes are
+listed in README.md under "hardening".
+
 # v1.6.4
 
 Wayland compositor release. Five independent reviews of `backend_wlr.c`
