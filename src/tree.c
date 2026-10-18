@@ -42,17 +42,6 @@
 #include "tree.h"
 #include "rule.h"
 
-#define SAFE_ADD(a, b, max) ((b) > 0 && (a) > (max) - (b)) ? (max) : (a) + (b)
-#define SAFE_SUB(a, b) ((a) < (b) ? 0 : (a) - (b))
-
-/* Secure memset that won't be optimized away */
-void secure_memzero(void *ptr, size_t len)
-{
-	volatile unsigned char *p = ptr;
-	while (len--) {
-		*p++ = 0;
-	}
-}
 
 void arrange(monitor_t *m, desktop_t *d)
 {
@@ -62,25 +51,23 @@ void arrange(monitor_t *m, desktop_t *d)
 
 	bspwm_rect_t rect = m->rectangle;
 
-	rect.x = SAFE_ADD(rect.x, SAFE_ADD(m->padding.left, d->padding.left, UINT16_MAX), UINT16_MAX);
-	rect.y = SAFE_ADD(rect.y, SAFE_ADD(m->padding.top, d->padding.top, UINT16_MAX), UINT16_MAX);
-	rect.width = SAFE_SUB(rect.width, SAFE_ADD(m->padding.left + d->padding.left,
-	                                           d->padding.right + m->padding.right, UINT16_MAX));
-	rect.height = SAFE_SUB(rect.height, SAFE_ADD(m->padding.top + d->padding.top,
-	                                             d->padding.bottom + m->padding.bottom, UINT16_MAX));
+	rect.x += m->padding.left + d->padding.left;
+	rect.y += m->padding.top + d->padding.top;
+	unsigned_subtract(rect.width, m->padding.left + d->padding.left + d->padding.right + m->padding.right);
+	unsigned_subtract(rect.height, m->padding.top + d->padding.top + d->padding.bottom + m->padding.bottom);
 
 	if (d->layout == LAYOUT_MONOCLE) {
-		rect.x = SAFE_ADD(rect.x, monocle_padding.left, UINT16_MAX);
-		rect.y = SAFE_ADD(rect.y, monocle_padding.top, UINT16_MAX);
-		rect.width = SAFE_SUB(rect.width, monocle_padding.left + monocle_padding.right);
-		rect.height = SAFE_SUB(rect.height, monocle_padding.top + monocle_padding.bottom);
+		rect.x += monocle_padding.left;
+		rect.y += monocle_padding.top;
+		unsigned_subtract(rect.width, monocle_padding.left + monocle_padding.right);
+		unsigned_subtract(rect.height, monocle_padding.top + monocle_padding.bottom);
 	}
 
 	if (!gapless_monocle || d->layout != LAYOUT_MONOCLE) {
-		rect.x = SAFE_ADD(rect.x, d->window_gap, UINT16_MAX);
-		rect.y = SAFE_ADD(rect.y, d->window_gap, UINT16_MAX);
-		rect.width = SAFE_SUB(rect.width, d->window_gap);
-		rect.height = SAFE_SUB(rect.height, d->window_gap);
+		rect.x += d->window_gap;
+		rect.y += d->window_gap;
+		unsigned_subtract(rect.width, d->window_gap);
+		unsigned_subtract(rect.height, d->window_gap);
 	}
 
 	apply_layout(m, d, d->root, rect, rect);
@@ -172,8 +159,7 @@ void apply_layout(monitor_t *m, desktop_t *d, node_t *n, bspwm_rect_t rect, bspw
 			unsigned int fence;
 			if (n->split_type == TYPE_VERTICAL) {
 				fence = (unsigned int)(rect.width * n->split_ratio);
-				uint16_t min_sum = SAFE_ADD(n->first_child->constraints.min_width,
-				                           n->second_child->constraints.min_width, UINT16_MAX);
+				unsigned int min_sum = n->first_child->constraints.min_width + n->second_child->constraints.min_width;
 
 				if (min_sum <= rect.width) {
 					if (fence < n->first_child->constraints.min_width) {
@@ -189,8 +175,7 @@ void apply_layout(monitor_t *m, desktop_t *d, node_t *n, bspwm_rect_t rect, bspw
 				second_rect = (bspwm_rect_t){rect.x + fence, rect.y, rect.width - fence, rect.height};
 			} else {
 				fence = (unsigned int)(rect.height * n->split_ratio);
-				uint16_t min_sum = SAFE_ADD(n->first_child->constraints.min_height,
-				                           n->second_child->constraints.min_height, UINT16_MAX);
+				unsigned int min_sum = n->first_child->constraints.min_height + n->second_child->constraints.min_height;
 
 				if (min_sum <= rect.height) {
 					if (fence < n->first_child->constraints.min_height) {
@@ -1046,60 +1031,6 @@ node_t *first_extrema(node_t *n)
 	return n;
 }
 
-static bool collect_leaves_rec(node_t *n, node_list_t *list)
-{
-	if (!n) {
-		return true;
-	}
-	if (is_leaf(n)) {
-		if (list->count >= list->capacity) {
-			size_t new_cap = list->capacity;
-			if (!safe_double(&new_cap)) {
-				return false;
-			}
-			node_t **new_nodes = safe_realloc_array(list->nodes, new_cap, sizeof(node_t*));
-			if (!new_nodes) {
-				return false;
-			}
-			list->nodes = new_nodes;
-			list->capacity = new_cap;
-		}
-		list->nodes[list->count++] = n;
-		return true;
-	}
-	return collect_leaves_rec(n->first_child, list) &&
-	       collect_leaves_rec(n->second_child, list);
-}
-
-node_list_t *collect_leaves(node_t *root)
-{
-	if (!root) return NULL;
-
-	node_list_t *list = malloc(sizeof(node_list_t));
-	if (!list) return NULL;
-
-	list->capacity = 64;
-	list->count = 0;
-	list->nodes = safe_malloc_array(list->capacity, sizeof(node_t*));
-	if (!list->nodes) {
-		free(list);
-		return NULL;
-	}
-
-	if (!collect_leaves_rec(root, list)) {
-		free_node_list(list);
-		return NULL;
-	}
-	return list;
-}
-
-void free_node_list(node_list_t *list)
-{
-	if (!list) return;
-	free(list->nodes);
-	free(list);
-}
-
 node_t *second_extrema(node_t *n)
 {
 	if (!n) {
@@ -1780,11 +1711,11 @@ void remove_node(monitor_t *m, desktop_t *d, node_t *n)
 	cancel_presel_in(m, d, n);
 
 	if (m->sticky_count > 0 && d == m->desk) {
-		m->sticky_count = SAFE_SUB(m->sticky_count, sticky_count(n));
+		unsigned_subtract(m->sticky_count, sticky_count(n));
 	}
 
-	clients_count = SAFE_SUB(clients_count, clients_count_in(n));
-	d->urgent_count = SAFE_SUB(d->urgent_count, urgent_count_in(n));
+	unsigned_subtract(clients_count, clients_count_in(n));
+	unsigned_subtract(d->urgent_count, urgent_count_in(n));
 
 	if (is_descendant(grabbed_node, n)) {
 		grabbed_node = NULL;
@@ -1809,32 +1740,14 @@ void remove_node(monitor_t *m, desktop_t *d, node_t *n)
 
 void free_node(node_t *n)
 {
-	if (!n) {
+	if (n == NULL) {
 		return;
 	}
-
 	node_t *first_child = n->first_child;
 	node_t *second_child = n->second_child;
-
-	n->first_child = NULL;
-	n->second_child = NULL;
-	n->parent = NULL;
-
-	if (n->client) {
-		secure_memzero(n->client, sizeof(client_t));
-		free(n->client);
-		n->client = NULL;
-	}
-
-	if (n->presel) {
-		secure_memzero(n->presel, sizeof(presel_t));
-		free(n->presel);
-		n->presel = NULL;
-	}
-
-	secure_memzero(n, sizeof(node_t));
+	free(n->client);
+	free(n->presel);
 	free(n);
-
 	free_node(first_child);
 	free_node(second_child);
 }
@@ -1873,8 +1786,10 @@ bool swap_nodes(monitor_t *m1, desktop_t *d1, node_t *n1, monitor_t *m2, desktop
 		unsigned int n1_urgent = urgent_count_in(n1);
 		unsigned int n2_urgent = urgent_count_in(n2);
 		if (n1_urgent != n2_urgent) {
-			d1->urgent_count = SAFE_ADD(SAFE_SUB(d1->urgent_count, n1_urgent), n2_urgent, UINT_MAX);
-			d2->urgent_count = SAFE_ADD(SAFE_SUB(d2->urgent_count, n2_urgent), n1_urgent, UINT_MAX);
+			unsigned_subtract(d1->urgent_count, n1_urgent);
+			d1->urgent_count += n2_urgent;
+			unsigned_subtract(d2->urgent_count, n2_urgent);
+			d2->urgent_count += n1_urgent;
 		}
 	}
 
@@ -2118,8 +2033,8 @@ bool transfer_node(monitor_t *ms, desktop_t *ds, node_t *ns, monitor_t *md, desk
 		if (!ns->client || monitor_from_client(ns->client) != md) {
 			adapt_geometry(&ms->rectangle, &md->rectangle, ns);
 		}
-		ms->sticky_count = SAFE_SUB(ms->sticky_count, sc);
-		md->sticky_count = SAFE_ADD(md->sticky_count, sc, UINT_MAX);
+		unsigned_subtract(ms->sticky_count, sc);
+		md->sticky_count += sc;
 	}
 
 	if (ds != dd) {
@@ -2132,8 +2047,8 @@ bool transfer_node(monitor_t *ms, desktop_t *ds, node_t *ns, monitor_t *md, desk
 			}
 		}
 		if (uc > 0) {
-			ds->urgent_count = SAFE_SUB(ds->urgent_count, uc);
-			dd->urgent_count = SAFE_ADD(dd->urgent_count, uc, UINT_MAX);
+			unsigned_subtract(ds->urgent_count, uc);
+			dd->urgent_count += uc;
 		}
 	}
 
@@ -2601,7 +2516,7 @@ void update_constraints(node_t *n)
 		uint16_t min_w1 = n->first_child->constraints.min_width;
 		uint16_t min_w2 = n->second_child->constraints.min_width;
 
-		n->constraints.min_width = SAFE_ADD(min_w1, min_w2, UINT16_MAX);
+		n->constraints.min_width = MIN(min_w1 + min_w2, UINT16_MAX);
 		n->constraints.min_height = MAX(n->first_child->constraints.min_height,
 		                               n->second_child->constraints.min_height);
 	} else {
@@ -2611,7 +2526,7 @@ void update_constraints(node_t *n)
 		uint16_t min_h1 = n->first_child->constraints.min_height;
 		uint16_t min_h2 = n->second_child->constraints.min_height;
 
-		n->constraints.min_height = SAFE_ADD(min_h1, min_h2, UINT16_MAX);
+		n->constraints.min_height = MIN(min_h1 + min_h2, UINT16_MAX);
 	}
 }
 
@@ -2742,7 +2657,7 @@ void set_sticky(monitor_t *m, desktop_t *d, node_t *n, bool value)
 	if (value) {
 		m->sticky_count++;
 	} else {
-		m->sticky_count = SAFE_SUB(m->sticky_count, 1);
+		unsigned_subtract(m->sticky_count, 1);
 	}
 
 	if (n->client) {
@@ -2836,7 +2751,7 @@ void set_urgent(monitor_t *m, desktop_t *d, node_t *n, bool value)
 		if (value) {
 			d->urgent_count++;
 		} else {
-			d->urgent_count = SAFE_SUB(d->urgent_count, 1);
+			unsigned_subtract(d->urgent_count, 1);
 		}
 	}
 
@@ -2872,8 +2787,8 @@ bspwm_rect_t get_rectangle(monitor_t *m, desktop_t *d, node_t *n)
 	} else {
 		int wg = (!d ? 0 : (gapless_monocle && d->layout == LAYOUT_MONOCLE ? 0 : d->window_gap));
 		bspwm_rect_t rect = n->rectangle;
-		rect.width = SAFE_SUB(rect.width, wg);
-		rect.height = SAFE_SUB(rect.height, wg);
+		unsigned_subtract(rect.width, wg);
+		unsigned_subtract(rect.height, wg);
 		return rect;
 	}
 }

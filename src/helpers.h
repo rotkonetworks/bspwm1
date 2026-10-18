@@ -122,7 +122,6 @@ __attribute__((warn_unused_result)) int make_socket_path(char *buf, size_t bufle
 int make_state_path(char *buf, size_t buflen, const char *host, int dn, int sn);
 __attribute__((cold, format(printf, 1, 2))) void warn(char *fmt, ...);
 __attribute__((cold, format(printf, 1, 2), noreturn)) void err(char *fmt, ...);
-void secure_memzero(void *ptr, size_t len);
 __attribute__((warn_unused_result)) char *read_string(const char *file_path, size_t *tlen);
 __attribute__((warn_unused_result)) char *copy_string(char *str, size_t len);
 __attribute__((warn_unused_result)) char *mktempfifo(const char *template);

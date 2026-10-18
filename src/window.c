@@ -123,7 +123,6 @@ static bool fills_monitor(monitor_t *m, client_t *c)
 static void clear_consequence_payload(rule_consequence_t *csq)
 {
 	if (csq->layer != NULL) {
-		secure_memzero(csq->layer, sizeof(stack_layer_t));
 		free(csq->layer);
 		csq->layer = NULL;
 	}
