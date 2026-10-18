@@ -492,6 +492,9 @@ bool backend_get_window_type(bspwm_wid_t win, bspwm_window_type_t *type)
 void backend_ewmh_init(void)
 {
 	ewmh = calloc(1, sizeof(xcb_ewmh_connection_t));
+	if (ewmh == NULL) {
+		err("Can't allocate the EWMH connection.\n");
+	}
 	xcb_intern_atom_cookie_t *ewmh_cookies = xcb_ewmh_init_atoms(dpy, ewmh);
 	xcb_ewmh_init_atoms_replies(ewmh, ewmh_cookies, NULL);
 }

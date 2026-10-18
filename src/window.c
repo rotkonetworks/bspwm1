@@ -1127,18 +1127,16 @@ void set_atom(bspwm_wid_t win, xcb_atom_t atom, uint32_t value)
 
 void send_client_message(bspwm_wid_t win, xcb_atom_t property, xcb_atom_t value)
 {
-	xcb_client_message_event_t *e = calloc(32, 1);
+	xcb_client_message_event_t e = {
+		.response_type = XCB_CLIENT_MESSAGE,
+		.format = 32,
+		.window = win,
+		.type = property,
+		.data.data32 = {value, XCB_CURRENT_TIME},
+	};
 
-	e->response_type = XCB_CLIENT_MESSAGE;
-	e->window = win;
-	e->type = property;
-	e->format = 32;
-	e->data.data32[0] = value;
-	e->data.data32[1] = XCB_CURRENT_TIME;
-
-	xcb_send_event(dpy, false, win, XCB_EVENT_MASK_NO_EVENT, (char *) e);
+	xcb_send_event(dpy, false, win, XCB_EVENT_MASK_NO_EVENT, (char *) &e);
 	xcb_flush(dpy);
-	free(e);
 }
 
 bool window_exists(bspwm_wid_t win)

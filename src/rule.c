@@ -633,6 +633,9 @@ static void csq_set_rectangle(char *value, rule_consequence_t *csq)
 {
 	if (csq->rect == NULL) {
 		csq->rect = calloc(1, sizeof(bspwm_rect_t));
+		if (csq->rect == NULL) {
+			return;
+		}
 	}
 	if (!parse_rectangle(value, csq->rect)) {
 		free(csq->rect);
